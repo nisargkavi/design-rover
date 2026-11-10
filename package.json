@@ -15,6 +15,7 @@
     "dev:cli": "bun run --filter design-rover dev",
     "dev:web": "bun run --filter @design-rover/web dev",
     "smoke:cli": "node scripts/smoke-cli.mjs",
+    "verify:published": "node scripts/verify-published.mjs",
     "design-rover": "tsx packages/cli/src/bin.ts"
   },
   "devDependencies": {

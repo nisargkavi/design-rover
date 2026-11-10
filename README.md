@@ -6,9 +6,17 @@ Repository design knowledge for people and AI agents.
 
 Design Rover scans an existing React/TypeScript codebase, records its components, scoped tokens and UI conventions, and proposes reviewable updates. The canonical model stays in your repository. Agent guidance, MCP and checks use the same model.
 
-## Try this checkout
+## Get started
 
-This checkout prepares version **0.2.0**. Publish the release before using the registry entrypoint `bunx design-rover@0.2.0`.
+Run this from the project you want to analyze:
+
+```sh
+bunx design-rover init
+```
+
+To pin the release, use `bunx design-rover@0.2.0 init`.
+
+## Development
 
 Use Bun 1.4.4 for dependencies and development scripts. The packaged CLI supports Node >=20.19.0.
 
@@ -19,6 +27,8 @@ bun run test
 bun run pack:cli
 bun run smoke:cli
 ```
+
+After publishing, run `bun run verify:published` to check the public npm release with a fresh project and an empty Bun cache.
 
 Run directly from source:
 
@@ -35,8 +45,6 @@ Or install the local CLI tarball:
 bun add --global ./design-rover-0.2.0.tgz
 design-rover init
 ```
-
-After publication, run `bunx design-rover@0.2.0 init` from the repository you want to analyze.
 
 ## Workflow
 

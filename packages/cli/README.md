@@ -10,7 +10,7 @@ bunx design-rover generate
 bunx design-rover check
 ```
 
-This source prepares 0.2.0; it must be published before the new npm entrypoint is available.
+Requires Node >=20.19.0. Bun downloads and runs the CLI directly; no global installation is required.
 
 Canonical models live in `.design-rover/`. Review proposed changes before updating approved knowledge. Notes outside generated managed blocks are preserved, and customized adapters require resolution instead of silent overwrites.
 

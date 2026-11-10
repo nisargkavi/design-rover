@@ -1,0 +1,49 @@
+{
+  "name": "design-rover",
+  "version": "0.2.0",
+  "description": "Repository design knowledge for people and AI agents.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nisargkavi/design-rover.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "design-rover": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx src/bin.ts",
+    "build": "tsup",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "fast-glob": "^3.3.3",
+    "ignore": "^7.0.5",
+    "picocolors": "^1.1.1",
+    "typescript": "^5.9.2",
+    "zod": "^4.1.5",
+    "postcss": "^8.5.28"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "@design-rover/core": "workspace:*",
+    "@design-rover/model": "workspace:*",
+    "@design-rover/integrations": "workspace:*",
+    "@design-rover/mcp": "workspace:*"
+  },
+  "exports": {
+    "./cli": "./dist/bin.js"
+  }
+}

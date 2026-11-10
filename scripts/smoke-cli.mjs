@@ -1,0 +1,69 @@
+import assert from "node:assert/strict"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { spawnSync } from "node:child_process"
+import { pathToFileURL } from "node:url"
+import { createRequire } from "node:module"
+
+const project = process.cwd()
+const manifest = JSON.parse(await fs.readFile(path.join(project, "packages/cli/package.json"), "utf8"))
+const version = manifest.version
+const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "design-rover-package-"))
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: 90_000, ...options })
+  if (result.error) throw result.error
+  assert.equal(result.status, options.expectedStatus ?? 0, `${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`)
+  return result.stdout
+}
+
+try {
+  // Install the unpublished release artifact in an isolated Bun project.
+  const primaryTarball = `file:${path.join(project, `design-rover-${version}.tgz`)}`
+  await fs.writeFile(path.join(temporary, "package.json"), JSON.stringify({
+    private: true,
+    dependencies: {
+      "design-rover": primaryTarball,
+    },
+  }))
+  run("bun", ["install", "--ignore-scripts", "--no-progress"], { cwd: temporary })
+  const cli = path.join(temporary, "node_modules/design-rover/dist/bin.js")
+  const fixture = path.join(temporary, "fixture")
+  await fs.cp(path.join(project, "fixtures/next-tailwind"), fixture, { recursive: true, filter: (file) => !file.includes("node_modules") && !file.includes(".design-rover") })
+  const call = (entry, args, expectedStatus = 0) => run(process.execPath, [entry, ...args, "--cwd", fixture], { expectedStatus })
+  const json = (args, expectedStatus = 0, entry = cli) => JSON.parse(call(entry, [...args, "--json"], expectedStatus))
+
+  assert.equal(call(cli, ["--version"]).trim(), version)
+  assert.equal(run("bun", ["run", "design-rover", "--version"], { cwd: temporary }).trim(), version)
+  const installed = JSON.parse(await fs.readFile(path.join(temporary, "node_modules/design-rover/package.json"), "utf8"))
+  assert.deepEqual(installed.bin, { "design-rover": "./dist/bin.js" })
+  assert.equal(json(["init", "--approve", "--generate"]).pending, 0)
+  const status = json(["status"])
+  assert.equal(status.syncStatus, "synchronized")
+  assert.deepEqual(status.staleGenerated, [])
+  assert.equal(json(["check"]).preservedArchitecture, true)
+  assert.equal(json(["ci", "--fail-on", "warning"], 1).ok, false)
+  assert.equal(json(["ci", "--fail-on", "none"]).ok, true)
+  assert.match(json(["ci", "--fail-on", "typo"], 1).error, /fail-on/)
+  json(["baseline"])
+  const baseline = await fs.readFile(path.join(fixture, ".design-rover/baseline.json"), "utf8")
+  json(["init", "--generate"])
+  assert.equal(await fs.readFile(path.join(fixture, ".design-rover/baseline.json"), "utf8"), baseline)
+  assert.deepEqual(json(["status"]).staleGenerated, [])
+
+  const require = createRequire(cli)
+  const { Client } = await import(pathToFileURL(require.resolve("@modelcontextprotocol/sdk/client/index.js")).href)
+  const { StdioClientTransport } = await import(pathToFileURL(require.resolve("@modelcontextprotocol/sdk/client/stdio.js")).href)
+  const client = new Client({ name: "packaged-cli-smoke", version: "1.0.0" })
+  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, "mcp", "--cwd", fixture] })
+  try {
+    await client.connect(transport)
+    assert.equal((await client.listTools()).tools.length, 9)
+    const response = await client.callTool({ name: "get_system", arguments: {} })
+    assert.notEqual(response.isError, true)
+  } finally { await client.close() }
+  console.log(`Packaged CLI ${version}: init/generate/check, JSON gates, baseline preservation and stdio MCP passed.`)
+} finally {
+  await fs.rm(temporary, { recursive: true, force: true })
+}

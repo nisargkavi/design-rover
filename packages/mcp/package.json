@@ -1,0 +1,21 @@
+{
+  "name": "@design-rover/mcp",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@design-rover/core": "workspace:*",
+    "@design-rover/model": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

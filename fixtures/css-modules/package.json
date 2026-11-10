@@ -1,0 +1,9 @@
+{
+  "name": "@design-rover/fixture-css-modules",
+  "private": true,
+  "version": "0.2.0",
+  "dependencies": {
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  }
+}

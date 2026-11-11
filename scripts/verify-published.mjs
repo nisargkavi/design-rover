@@ -64,8 +64,11 @@ async function records(kind) {
 try {
   const freshFiles = new Map([
     ["package.json", `${JSON.stringify({ name: "fresh-react-project", private: true, type: "module", dependencies: { react: "^19.0.0" }, devDependencies: { typescript: "^5.9.0" } }, null, 2)}\n`],
-    ["src/components/ui/Button.tsx", 'export function Button({ children }: { children?: string }) {\n  return <button>{children}</button>\n}\n'],
-    ["src/App.tsx", 'import { Button } from "./components/ui/Button"\nexport function App() { return <Button>Save</Button> }\n'],
+    ["src/components/ui/types/props.ts", 'export interface ButtonProps { children?: string; tone: "primary" | "quiet" }\n'],
+    ["src/components/ui/types/index.ts", 'export type { ButtonProps as UiButtonProps } from "./props"\n'],
+    ["src/components/ui/Button.tsx", 'import type { UiButtonProps } from "./types"\nexport function Button({ children }: UiButtonProps) {\n  return <button>{children}</button>\n}\n'],
+    ["src/components/ui/index.ts", 'export { Button as ActionButton } from "./Button"\n'],
+    ["src/App.tsx", 'import { ActionButton as Button } from "./components/ui"\nexport function App() { return <Button tone="primary">Save</Button> }\n'],
     ["src/theme.css", ":root { --color-primary: #123456; }\n.dark { --color-primary: #abcdef; }\n"],
   ])
   await fs.mkdir(project, { recursive: true })
@@ -87,7 +90,11 @@ try {
   const system = JSON.parse(await fs.readFile(path.join(project, ".design-rover/system.json"), "utf8"))
   const components = await records("components")
   const tokens = await records("tokens")
-  assert.ok(components.some((item) => item.name === "Button" && item.source === "src/components/ui/Button.tsx"), "The published CLI did not discover the actual Button source")
+  const button = components.find((item) => item.name === "Button" && item.source === "src/components/ui/Button.tsx")
+  assert.ok(button, "The published CLI did not discover the actual Button source")
+  assert.equal(button.propsResolution?.status, "resolved", "The published CLI did not resolve imported prop types")
+  assert.ok(button.props.some((prop) => prop.name === "tone" && prop.required && prop.values?.includes("quiet")))
+  assert.ok(button.usage.some((usage) => usage.file === "src/App.tsx"), "The published CLI did not follow the aliased barrel export")
   const primary = tokens.filter((item) => item.name === "--color-primary")
   assert.equal(primary.length, 2, "Root and dark declarations must remain distinct")
   assert.ok(primary.some((item) => item.scope === ":root" && item.value === "#123456"))
@@ -101,6 +108,12 @@ try {
   const check = JSON.parse(bunx(["check", "--json"]))
   assert.equal(check.preservedArchitecture, true)
   assert.ok(Array.isArray(check.diagnostics))
+  const contextOutput = bunx(["context", "Button", "--path", "src/App.tsx", "--max-chars", "8000", "--json"])
+  const context = JSON.parse(contextOutput)
+  assert.ok(contextOutput.length <= 8000, "Published context output exceeded its character budget")
+  assert.equal(context.limits.outputChars, contextOutput.length)
+  assert.equal(context.freshness.checked, false)
+  assert.ok(context.matches.some((match) => match.kind === "component" && match.record.id === button.id), "Published path retrieval missed the component used through a barrel")
   for (const [file, content] of freshFiles) assert.equal(await fs.readFile(path.join(project, file), "utf8"), content, `Source changed: ${file}`)
   await assert.rejects(fs.stat(path.join(project, "node_modules")), { code: "ENOENT" })
 
@@ -112,8 +125,11 @@ try {
     integrity: published.dist.integrity,
     framework: system.framework.name,
     components: components.length,
+    importedPropsResolved: true,
+    barrelUsageResolved: true,
+    boundedPathContextVerified: true,
     scopedPrimaryTokens: primary.length,
-    commands: ["bunx design-rover init", "bunx design-rover --version", "bunx design-rover status --json", "bunx design-rover check --json"],
+    commands: ["bunx design-rover init", "bunx design-rover --version", "bunx design-rover status --json", "bunx design-rover check --json", "bunx design-rover context Button --path src/App.tsx --max-chars 8000 --json"],
     projectDependencyInstalled: false,
     sourcePreserved: true,
   }, null, 2))

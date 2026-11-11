@@ -511,7 +511,7 @@ export function extractFileEvidence(input: {
   function visit(node: ts.Node) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const names: string[] = []
-      const importedBindings: { local: string; imported: string }[] = []
+      const importedBindings: { local: string; imported: string; isTypeOnly?: boolean }[] = []
       let defaultName: string | undefined
       const clause = node.importClause
       if (clause?.name) {
@@ -522,7 +522,7 @@ export function extractFileEvidence(input: {
       if (bindings && ts.isNamedImports(bindings)) {
         for (const el of bindings.elements) {
           names.push(el.name.text)
-          importedBindings.push({ local: el.name.text, imported: el.propertyName?.text ?? el.name.text })
+          importedBindings.push({ local: el.name.text, imported: el.propertyName?.text ?? el.name.text, isTypeOnly: el.isTypeOnly || undefined })
         }
       }
       if (bindings && ts.isNamespaceImport(bindings)) importedBindings.push({ local: bindings.name.text, imported: "*" })

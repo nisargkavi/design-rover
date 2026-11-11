@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util"
 import path from "node:path"
-import { createEngine, isInitialized } from "@design-rover/core"
+import { createEngine, isInitialized, serializeContext } from "@design-rover/core"
 import { CLI_VERSION } from "@design-rover/model"
 import { mapShadcnLint, oxlintFromMap, reconcileSources } from "@design-rover/integrations"
 import * as clack from "@clack/prompts"
@@ -32,6 +32,7 @@ Usage
   design-rover diff            Show canonical system changes
   design-rover explain <name>  Explain a component, pattern, convention, or intent
   design-rover query <q>       Search the canonical model
+  design-rover context [task]  Retrieve bounded design context for a task and/or path
   design-rover generate        Write AGENTS.md / CLAUDE.md / Cursor rules / skill
   design-rover history         Show how the canonical system changed
   design-rover baseline        Capture current findings as existing debt
@@ -53,6 +54,10 @@ Options
   --version       Print the CLI version
   --cwd <path>    Repository root
   --base <ref>    Git base for incremental / PR / CI
+  --path <path>   Context: repository-relative file or directory
+  --limit <n>     Context: maximum whole records (default 20, maximum 100)
+  --max-chars <n> Context: maximum formatted JSON characters (default 12000)
+  --include-pending  Context: include inferences and suggestions for review
   --fail-on <level>   CI: error (default) | warning | none
 `
 
@@ -67,6 +72,10 @@ async function main() {
       version: { type: "boolean", short: "v", default: false },
       cwd: { type: "string" },
       base: { type: "string" },
+      path: { type: "string" },
+      limit: { type: "string" },
+      "max-chars": { type: "string" },
+      "include-pending": { type: "boolean", default: false },
       "fail-on": { type: "string", default: "error" },
       approve: { type: "boolean", default: false },
       generate: { type: "boolean", default: false },
@@ -228,6 +237,19 @@ async function main() {
       line(text)
       line()
     }
+    return
+  }
+
+  if (command === "context") {
+    const packet = await engine.context({
+      query: rest.join(" ") || undefined,
+      path: parsed.values.path,
+      includePending: Boolean(parsed.values["include-pending"]),
+      limit: parsed.values.limit === undefined ? undefined : Number(parsed.values.limit),
+      maxChars: parsed.values["max-chars"] === undefined ? undefined : Number(parsed.values["max-chars"]),
+    })
+    // This command has one bounded representation, with or without --json.
+    process.stdout.write(serializeContext(packet))
     return
   }
 

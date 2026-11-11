@@ -3,6 +3,7 @@ import { entityId, type ComponentRecord } from "@design-rover/model"
 import type { ExtractedComponent, RepoEvidence } from "../evidence.ts"
 import { shortHash } from "../hash.ts"
 import { resolveComponent } from "../component-resolution.ts"
+import { resolveComponentProps } from "../type-resolution.ts"
 
 function isUiPath(file: string): boolean {
   return /(^|\/)(components\/ui|ui\/|components\/primitives)\//.test(file)
@@ -121,18 +122,21 @@ function toRecord(
   id: string,
   tokenNames: string[],
 ): ComponentRecord {
+  const api = resolveComponentProps(evidence, component)
   return {
     id,
     name: component.name,
     source: component.file,
     importPath: importPathFor(evidence, component.file, component.name),
     exportName: component.isDefault ? "default" : component.exportName,
-    props: component.props.map((prop) => ({
+    props: api.props.map((prop) => ({
       name: prop.name,
       type: prop.type,
       required: prop.required,
       values: prop.values,
+      defaultValue: prop.defaultValue,
     })),
+    propsResolution: api.resolution,
     variants: component.variants,
     sizes: component.sizes,
     composition: component.composition,
@@ -143,7 +147,7 @@ function toRecord(
     architecture,
     local,
     status: "observed",
-    confidence: "high",
+    confidence: api.resolution.status === "resolved" ? "high" : api.resolution.status === "partial" ? "medium" : "low",
     originKind: "implementation",
     evidence: [
       {
@@ -153,6 +157,12 @@ function toRecord(
         location: { file: component.file, startLine: component.startLine },
         count: usage.length,
       },
+      ...api.resolution.issues.map((description, index) => ({
+        id: `${id}:api-${index}`,
+        kind: "component-api-resolution",
+        description,
+        location: { file: component.file, startLine: component.startLine },
+      })),
     ],
   }
 }

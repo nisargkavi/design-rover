@@ -1,0 +1,254 @@
+import path from "node:path"
+import ignore from "ignore"
+import type { CanonicalModel } from "@design-rover/model"
+
+const KINDS = ["component", "token", "pattern", "convention", "intent", "exception"] as const
+export type ContextKind = typeof KINDS[number]
+export type ContextRecord = CanonicalModel["components" | "tokens" | "patterns" | "conventions" | "intents" | "exceptions"][number]
+export type ContextOptions = {
+  query?: string
+  path?: string
+  includePending?: boolean
+  limit?: number
+  maxChars?: number
+}
+
+export type ContextMatch = {
+  kind: ContextKind
+  score: number
+  reasons: string[]
+  sourceRefs: string[]
+  record: ContextRecord
+}
+
+export type ContextPacket = {
+  version: 1
+  repository: string
+  scope: { query: string | null; path: string | null; includePending: boolean }
+  limits: { limit: number; maxChars: number; outputChars: number; unit: "UTF-16 code units including JSON formatting and final newline" }
+  freshness: { checked: false; canonicalUpdatedAt: string; lastAnalyzedAt: string | null; recordedSyncStatus: string }
+  coverage: {
+    matched: number; returned: number; complete: boolean
+    omittedByLimit: number; omittedByBudget: number
+    approvedDecisions: { matched: number; returned: number; omitted: number }
+  }
+  warnings: string[]
+  matches: ContextMatch[]
+}
+
+const STOP_WORDS = new Set(["a", "an", "the", "to", "for", "with", "on", "in", "and", "or", "of", "this", "that", "please", "build", "create", "edit", "update", "change", "add", "implement", "make", "use", "using"])
+const normalizeText = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase()
+const lexicalWords = (value: string) => normalizeText(value).split(/[^a-z0-9_-]+/).filter((word) => word && !STOP_WORDS.has(word))
+const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
+
+function normalizePath(value: string): string {
+  const input = value.trim().replace(/\\/g, "/")
+  if (!input || input.length > 512 || input.includes("\0") || input.startsWith("/") || /^[a-z]:/i.test(input)) throw new Error("Context path must be a repository-relative file or directory (at most 512 characters).")
+  const normalized = path.posix.normalize(input).replace(/\/$/, "")
+  if (normalized === ".." || normalized.startsWith("../")) throw new Error("Context path cannot leave the repository.")
+  return normalized
+}
+
+function owner(file: string): string | undefined {
+  const parts = file.split("/")
+  return (parts[0] === "apps" || parts[0] === "packages") && parts[1] ? `${parts[0]}/${parts[1]}` : undefined
+}
+
+function under(file: string, selected: string): boolean {
+  return selected === "." || file === selected || file.startsWith(`${selected}/`)
+}
+
+function sourceFiles(record: ContextRecord): string[] {
+  const files = record.evidence.flatMap((item) => item.location?.file ? [item.location.file] : [])
+  if ("source" in record) files.push(record.source)
+  if ("origin" in record) files.push(record.origin)
+  if ("occurrences" in record) files.push(...record.occurrences.map((item) => item.file))
+  if ("sourceRefs" in record) files.push(...record.sourceRefs.flatMap((item) => item.location?.file ? [item.location.file] : []))
+  return [...new Set(files.map((file) => file.replace(/\\/g, "/")).filter(Boolean))].sort(compare)
+}
+
+function lexicalScore(record: ContextRecord, query: string, words: string[]): number {
+  const name = "name" in record ? record.name : record.subject
+  if (query.toLowerCase() === record.id.toLowerCase()) return 300
+  const title = normalizeText(`${record.id} ${name}`)
+  const text = normalizeText(JSON.stringify(record))
+  let score = query.toLowerCase() === name.toLowerCase() ? 150 : 0
+  for (const word of words) {
+    if (title.includes(word)) score += 20
+    else if (text.includes(word)) score += 4
+  }
+  return score
+}
+
+function approvedDecision(match: ContextMatch): boolean {
+  return match.record.status === "approved" && match.kind !== "component" && match.kind !== "token"
+}
+
+function visible(kind: ContextKind, record: ContextRecord, includePending: boolean): boolean {
+  return record.status === "approved" || (kind !== "exception" && record.status === "observed")
+    || Boolean(includePending && (record.status === "inferred" || record.status === "suggested"))
+}
+
+function pathScopeMatches(patterns: string[], selected: string, allowDescendants = true): "direct" | "potential" | undefined {
+  if (selected === ".") return "potential"
+  const result = ignore().add(patterns).test(selected)
+  if (result.ignored) return "direct"
+  if (result.unignored) return undefined
+  // Directory requests include decisions for descendants, even when the pattern
+  // does not match the directory node itself (e.g. app/billing/**).
+  if (allowDescendants && patterns.some((pattern) => {
+    if (pattern.startsWith("!")) return false
+    const rawPrefix = pattern.replace(/^\//, "").split(/[?*\[]/, 1)[0]!
+    const prefix = rawPrefix.replace(/\/$/, "")
+    return !prefix || under(prefix, selected) || under(selected, prefix)
+      || (!rawPrefix.endsWith("/") && selected.startsWith(rawPrefix))
+  })) return "potential"
+  return undefined
+}
+
+/** Canonical-only retrieval. Source scanning and freshness checking remain explicit. */
+export function retrieveContext(model: CanonicalModel, options: ContextOptions = {}): ContextPacket {
+  const query = options.query?.trim() ?? ""
+  if (query.length > 512) throw new Error("Context query must be at most 512 characters.")
+  const selected = options.path === undefined ? undefined : normalizePath(options.path)
+  if (!query && selected === undefined) throw new Error("Provide a context query or a repository-relative path.")
+  const limit = options.limit ?? 20
+  const maxChars = options.maxChars ?? 12_000
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Context limit must be an integer from 1 to 100.")
+  if (!Number.isInteger(maxChars) || maxChars < 1024 || maxChars > 100_000) throw new Error("Context maxChars must be an integer from 1024 to 100000.")
+  const includePending = options.includePending ?? false
+  const words = [...new Set(lexicalWords(query))].slice(0, 32)
+  const matches: ContextMatch[] = []
+  const relevantComponents = new Set<string>()
+  const relevantPaths = new Set<string>()
+  const relevantOwners = new Set<string | undefined>()
+  const relevantComponentSources = new Set<string>()
+  const tokenNames = new Set<string>()
+
+  function relevance(kind: ContextKind, record: ContextRecord): ContextMatch | undefined {
+    if (!visible(kind, record, includePending)) return undefined
+    const files = sourceFiles(record)
+    const lexical = query ? lexicalScore(record, query, words) : 0
+    let pathScore = selected !== undefined && files.some((file) => under(file, selected)) ? 100 : 0
+    const reasons: string[] = []
+    if (kind === "component" && selected !== undefined && "usage" in record && record.usage.some((item) => under(item.file, selected))) {
+      pathScore = Math.max(pathScore, 120)
+      reasons.push("used-in-path")
+    }
+    const connected = kind === "token" && "origin" in record && (tokenNames.has(record.id)
+      || (tokenNames.has(record.name) && (owner(record.origin) === undefined || relevantOwners.has(owner(record.origin)) || (selected !== undefined && owner(record.origin) === owner(selected)))))
+    if (connected) { pathScore = Math.max(pathScore, 80); reasons.push("component-token") }
+    const globalDecision = (kind === "convention" || kind === "pattern" || kind === "intent") && !files.length
+    if (kind !== "component" && kind !== "token" && files.some((file) => relevantComponentSources.has(file))) {
+      pathScore = Math.max(pathScore, 110)
+      reasons.push("component-source-decision")
+    }
+    let applicable = false
+    if (kind === "exception" && "scope" in record && typeof record.scope === "object") {
+      const scope = record.scope
+      const componentsMatch = !scope.components.length || scope.components.some((item) => relevantComponents.has(item))
+      let pathsMatch: boolean
+      let potentialScope = false
+      try {
+        const matched = selected !== undefined ? pathScopeMatches(scope.paths, selected) : [...relevantPaths].map((file) => pathScopeMatches(scope.paths, file, false)).find(Boolean)
+        pathsMatch = !scope.paths.length || Boolean(matched)
+        potentialScope = scope.paths.length > 0 && matched === "potential"
+      } catch (error) {
+        throw new Error(`Cannot safely resolve exception scope ${record.id}: ${String(error)}`)
+      }
+      const pathRelevant = scope.paths.length > 0 && pathsMatch
+      applicable = Boolean((scope.paths.length || scope.components.length) && componentsMatch && pathsMatch)
+      if (selected !== undefined && !applicable && !pathRelevant) return undefined
+      if (applicable || pathRelevant) {
+        pathScore = Math.max(pathScore, 140)
+        reasons.push(potentialScope ? "path-exception-may-apply" : applicable ? "applicable-exception" : "path-exception-component-scope-unresolved")
+      }
+    }
+    if (selected !== undefined) {
+      const selectedOwner = owner(selected)
+      const foreign = files.length > 0 && files.every((file) => owner(file) !== undefined && owner(file) !== selectedOwner)
+      if (foreign && !pathScore && !applicable) return undefined
+      if (files.length && !pathScore && lexical < 20 && !globalDecision && !applicable) return undefined
+    }
+    if (!lexical && !pathScore && !globalDecision) return undefined
+    if (lexical) reasons.push("query-match")
+    if (pathScore && !reasons.length) reasons.push("source-in-path")
+    if (globalDecision) reasons.push("repository-decision")
+    const name = "name" in record ? record.name : record.subject
+    const explicitMatch = query.toLowerCase() === record.id.toLowerCase() || query.toLowerCase() === name.toLowerCase()
+    const nameWords = lexicalWords(name)
+    const requestedComponent = kind === "component" && nameWords.length > 0 && nameWords.every((word) => words.includes(word))
+    const requestBoost = explicitMatch ? 3000 : requestedComponent ? 2000 : 0
+    if (requestBoost) reasons.push("requested-record")
+    const decisionBoost = record.status === "approved" && kind !== "component" && kind !== "token" ? 1000 : 0
+    return { kind, score: requestBoost + decisionBoost + pathScore + lexical, reasons, sourceRefs: files, record }
+  }
+
+  for (const component of model.components) {
+    const match = relevance("component", component)
+    if (!match) continue
+    matches.push(match)
+    relevantComponents.add(component.id)
+    relevantComponents.add(component.name)
+    relevantPaths.add(component.source)
+    relevantOwners.add(owner(component.source))
+    relevantComponentSources.add(component.source)
+    for (const usage of component.usage) relevantPaths.add(usage.file)
+    for (const token of component.relatedTokens) tokenNames.add(token)
+  }
+  const collections = { token: model.tokens, pattern: model.patterns, convention: model.conventions, intent: model.intents, exception: model.exceptions }
+  for (const kind of ["token", "pattern", "convention", "intent", "exception"] as const) {
+    for (const record of collections[kind]) {
+      const match = relevance(kind, record)
+      if (match) matches.push(match)
+    }
+  }
+  matches.sort((left, right) => right.score - left.score || compare(left.kind, right.kind) || compare(left.record.id, right.record.id))
+  const decisionCount = matches.filter(approvedDecision).length
+  function packet(items: ContextMatch[], omittedByBudget: number, omittedByLimit: number): ContextPacket {
+    const returnedDecisions = items.filter(approvedDecision).length
+    const omittedDecisions = decisionCount - returnedDecisions
+    const result: ContextPacket = {
+      version: 1,
+      repository: model.system.repository.name,
+      scope: { query: query || null, path: selected ?? null, includePending },
+      limits: { limit, maxChars, outputChars: 0, unit: "UTF-16 code units including JSON formatting and final newline" },
+      freshness: { checked: false, canonicalUpdatedAt: model.system.updatedAt, lastAnalyzedAt: model.system.lastAnalyzedAt ?? null, recordedSyncStatus: model.system.syncStatus },
+      coverage: { matched: matches.length, returned: items.length, complete: items.length === matches.length, omittedByLimit, omittedByBudget, approvedDecisions: { matched: decisionCount, returned: returnedDecisions, omitted: omittedDecisions } },
+      warnings: ["Canonical snapshot only; run status to check source freshness."],
+      matches: items,
+    }
+    if (omittedDecisions) result.warnings.push("Applicable approved decisions were omitted. Retrieve them before treating this context as complete.")
+    if (items.length < matches.length) result.warnings.push("Whole records were omitted by the stated limits; raise the bounds or narrow the query/path. No record was sliced.")
+    if (items.some((item) => item.reasons.some((reason) => reason === "path-exception-may-apply" || reason === "path-exception-component-scope-unresolved"))) result.warnings.push("Some exception scopes may apply to descendants or unresolved components. Inspect their recorded scope before applying them.")
+    for (let pass = 0; pass < 4; pass += 1) {
+      const length = serializeContext(result).length
+      if (length === result.limits.outputChars) break
+      result.limits.outputChars = length
+    }
+    return result
+  }
+  const selectedMatches: ContextMatch[] = []
+  let omittedByBudget = 0
+  let omittedByLimit = 0
+  if (serializeContext(packet([], matches.length, 0)).length > maxChars) throw new Error("Context metadata exceeds maxChars. Increase the bound or shorten the query/path.")
+  for (const match of matches) {
+    if (selectedMatches.length >= limit) { omittedByLimit += 1; continue }
+    const candidate = packet([...selectedMatches, match], omittedByBudget, matches.length - selectedMatches.length - 1 - omittedByBudget)
+    if (serializeContext(candidate).length <= maxChars) selectedMatches.push(match)
+    else omittedByBudget += 1
+  }
+  let result = packet(selectedMatches, omittedByBudget, omittedByLimit)
+  // Metadata digits can grow as omissions accumulate. Enforce the final bound too.
+  while (serializeContext(result).length > maxChars && selectedMatches.length) {
+    selectedMatches.pop()
+    omittedByBudget += 1
+    result = packet(selectedMatches, omittedByBudget, omittedByLimit)
+  }
+  if (serializeContext(result).length > maxChars) throw new Error("Context metadata exceeds maxChars. Increase the bound.")
+  return result
+}
+
+export function serializeContext(packet: ContextPacket): string {
+  return `${JSON.stringify(packet, null, 2)}\n`
+}

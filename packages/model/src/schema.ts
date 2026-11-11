@@ -72,6 +72,11 @@ export const ComponentUsageSchema = z.object({
   count: z.number().int(),
 })
 
+export const ComponentPropsResolutionSchema = z.object({
+  status: z.enum(["resolved", "partial", "unresolved", "untyped"]),
+  issues: z.array(z.string()).default([]),
+})
+
 export const ComponentRecordSchema = KnowledgeMetaSchema.extend({
   id: z.string(),
   name: z.string(),
@@ -79,6 +84,7 @@ export const ComponentRecordSchema = KnowledgeMetaSchema.extend({
   importPath: z.string(),
   exportName: z.string(),
   props: z.array(ComponentPropSchema).default([]),
+  propsResolution: ComponentPropsResolutionSchema.optional(),
   variants: z.array(z.string()).default([]),
   sizes: z.array(z.string()).default([]),
   composition: z.array(z.string()).default([]),
@@ -415,6 +421,7 @@ export type CheckReport = z.infer<typeof CheckReportSchema>
 export type StatusReport = z.infer<typeof StatusReportSchema>
 export type GeneratedFile = z.infer<typeof GeneratedFileSchema>
 export type ComponentProp = z.infer<typeof ComponentPropSchema>
+export type ComponentPropsResolution = z.infer<typeof ComponentPropsResolutionSchema>
 export type DiagnosticSeverity = z.infer<typeof DiagnosticSeveritySchema>
 export type SyncState = z.infer<typeof SyncStateSchema>
 export type ChangeKind = z.infer<typeof ChangeKindSchema>

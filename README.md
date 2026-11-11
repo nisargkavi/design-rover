@@ -14,7 +14,7 @@ Run this from the project you want to analyze:
 bunx design-rover init
 ```
 
-To pin the release, use `bunx design-rover@0.2.0 init`.
+To pin the release, use `bunx design-rover@0.3.0 init`.
 
 ## Development
 
@@ -42,7 +42,7 @@ bun run design-rover check --cwd /path/to/app --json
 Or install the local CLI tarball:
 
 ```sh
-bun add --global ./design-rover-0.2.0.tgz
+bun add --global ./design-rover-0.3.0.tgz
 design-rover init
 ```
 
@@ -55,6 +55,7 @@ design-rover approve <id>         # approve one record or proposed change
 design-rover reject <id>          # reject an inference until material evidence changes
 design-rover generate             # refresh agent guidance
 design-rover query Button --json  # retrieve records; choose by ID when names repeat
+design-rover context "billing form" --path app/billing/page.tsx --max-chars 12000 --json
 design-rover explain <id>         # inspect API, scope and source
 design-rover check                # check against known decisions
 design-rover sync                 # review and accept observed updates
@@ -76,17 +77,28 @@ Canonical writes use a lock and staged updates with rollback. After an interrupt
 
 | Area | Current behavior |
 | --- | --- |
-| Components | React JSX and locally declared TypeScript APIs, CVA variants, import-aware identity and usage |
+| Components | React JSX, local and imported TypeScript prop APIs, CVA variants, local barrel-aware identity and usage |
 | Tokens | CSS custom properties with selector/media scope and importance; basic Tailwind configuration extraction |
 | Knowledge | Evidence-backed observations, reviewable inferences, explicit approvals and rejections |
 | Checks | Component contract drift, basic sizing/restyling findings, intent and convention diagnostics, baselines |
 | Agent guidance | Concise AGENTS.md, CLAUDE.md, Cursor rule and Agent Skill projections |
-| MCP | Nine tools; approved/observed records by default, explicit pending opt-in, ambiguity and initialization errors |
+| Agent retrieval | Task/query and path filters, deterministic relevance, whole records within a character budget, explicit omissions |
+| MCP | Ten tools; approved/observed records by default, explicit pending opt-in, ambiguity and initialization errors |
 | Studio | Local read-only viewer with origin checks and safe text rendering |
 | Figma/Storybook | Experimental local JSON evidence import; no direct service connector |
 | Hosted app | Experimental authenticated, repository-scoped, in-memory snapshot service |
 
-Imported/inherited TypeScript types, barrel re-exports and complex dynamic styling are not fully resolved. Ambiguous component lookups require an ID/source instead of guessing. Token declarations in different source files remain distinct because bundle/cascade order is unknown. Design Rover does not prove visual quality, accessibility or pixel parity.
+Type resolution follows scanned local modules; external package declarations and complex TypeScript expressions are not fully resolved. Component records expose their prop-resolution status and issues. Ambiguous or cyclic module lookups stay unresolved. Complex dynamic styling is not fully analyzed. Token declarations in different source files remain distinct because bundle/cascade order is unknown. Design Rover does not prove visual quality, accessibility or pixel parity.
+
+## Retrieve context for a task
+
+```sh
+bunx design-rover context "add a billing form" --path app/billing/page.tsx --limit 20 --max-chars 12000 --json
+```
+
+The `context` command and MCP `get_context` tool read the existing canonical model without scanning source files. Run `status --json` to check freshness and `sync` to review changes first. Retrieval prioritizes relevant components and applicable approved decisions, excludes unrelated package records when a path is provided, and excludes pending knowledge unless `--include-pending` is requested.
+
+The output reports omitted records and decisions when the result count or character budget is too small. Records are included whole. An incomplete result is not permission to ignore an omitted decision; narrow the task or increase the budget. Existing `query` and MCP `search_system` entrypoints remain available.
 
 Approved exceptions match a path using gitignore-style patterns and, when provided, a component name or ID. `allows` can name `restyle-spacing`, exact classes, or the broader `local-override`. A color exception does not suppress unrelated spacing findings. Inferred exceptions require approval.
 
@@ -115,6 +127,15 @@ apps/server           experimental hosted snapshots
 
 The CI workflow checks types, regressions, the CLI bundle and packaged behavior with Bun. Release tags must match the public package version.
 
-The next priorities are richer type resolution, bounded task/path retrieval, standards-based exports and real evidence adapters.
+Publish the verified tarball to npm first, wait for registry availability, then verify the fresh-project entrypoint:
+
+```sh
+npm publish ./design-rover-0.3.0.tgz --access public --tag latest
+bun run verify:published
+```
+
+Push a matching `v0.3.0` tag on the verified release commit to create the GitHub Release. The release workflow rebuilds and tests the tagged source, verifies every package file against the public npm tarball, and attaches that tarball and `SHA256SUMS`. It uses the repository's GitHub token; npm publication is a separate authenticated maintainer step.
+
+The next priorities are standards-based exports, broader type resolution and real evidence adapters.
 
 MIT. See [LICENSE](LICENSE).

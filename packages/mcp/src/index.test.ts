@@ -39,7 +39,7 @@ function content(result: Awaited<ReturnType<Client["callTool"]>>) {
 describe("MCP knowledge contracts", () => {
   it("reports an uninitialized model as an error rather than a clean snippet", async () => {
     const { client } = await session()
-    expect((await client.listTools()).tools).toHaveLength(9)
+    expect((await client.listTools()).tools).toHaveLength(10)
     const result = await client.callTool({ name: "check_code", arguments: { code: "<Button />" } })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain("not initialized")
@@ -69,5 +69,25 @@ describe("MCP knowledge contracts", () => {
     expect(ambiguous.choices).toHaveLength(2)
     const resolved = content(await client.callTool({ name: "get_component", arguments: { name: "Button", source: "b/Button.tsx" } }))
     expect(resolved.id).toBe("component.button-b")
+  })
+
+  it("exposes bounded path context without scanning source or returning unrelated packages", async () => {
+    const { root, client } = await session()
+    const model = emptyCanonical(root, "test")
+    model.components = [button("component.admin", "apps/admin/Button.tsx"), button("component.store", "apps/store/Button.tsx")]
+    await saveCanonical(root, model)
+    const tools = (await client.listTools()).tools
+    expect(tools.find((tool) => tool.name === "get_context")?.annotations?.readOnlyHint).toBe(true)
+    const response = await client.callTool({ name: "get_context", arguments: { query: "Button", path: "apps/admin", maxChars: 5000 } })
+    expect(response.isError).not.toBe(true)
+    const packet = content(response)
+    expect(packet.matches.map((item: { record: { id: string } }) => item.record.id)).toEqual(["component.admin"])
+    expect(packet.freshness.checked).toBe(false)
+    const text = (response.content as { type: string; text: string }[]).find((item) => item.type === "text")!.text
+    expect(text.length).toBe(packet.limits.outputChars)
+    expect(packet.limits.outputChars).toBeLessThanOrEqual(5000)
+    await expect(fs.stat(path.join(root, ".design-rover/cache"))).rejects.toMatchObject({ code: "ENOENT" })
+    const invalid = await client.callTool({ name: "get_context", arguments: { path: "../outside" } })
+    expect(invalid.isError).toBe(true)
   })
 })

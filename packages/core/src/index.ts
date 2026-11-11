@@ -1,6 +1,8 @@
 export { analyzeRepository } from "./analyze.ts"
 export { checkSnippet, checkSystem, captureBaseline } from "./check.ts"
 export { renderContext, writeGenerated, generatedHashes } from "./context.ts"
+export { retrieveContext, serializeContext } from "./retrieval.ts"
+export type { ContextOptions, ContextPacket, ContextMatch, ContextKind } from "./retrieval.ts"
 export { diffModels, diffAgainstRepo } from "./diff.ts"
 export { createEngine } from "./engine.ts"
 export { explain, searchModel } from "./explain.ts"

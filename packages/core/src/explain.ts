@@ -24,6 +24,8 @@ export function explain(model: CanonicalModel, query: string): string {
       `Variants: ${component.variants.join(", ") || "none"}`,
       `Sizes: ${component.sizes.join(", ") || "none"}`,
       `Props: ${component.props.map((prop) => `${prop.name}${prop.required ? "" : "?"}: ${prop.type ?? "unresolved"}${prop.defaultValue ? ` = ${prop.defaultValue}` : ""}`).join(", ") || "none"}`,
+      `Props resolution: ${component.propsResolution?.status ?? "not recorded"}`,
+      ...(component.propsResolution?.issues.map((issue) => `  ${issue}`) ?? []),
       `Architecture: ${component.architecture}`,
       `Usage: ${component.usage.reduce((sum, item) => sum + item.count, 0)} call sites in ${component.usage.length} files`,
       `Status: ${component.status}`,

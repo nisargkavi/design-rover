@@ -1,33 +1,59 @@
-name: Publish CLI
+name: GitHub Release
 
 on:
   push:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      contents: read
-      id-token: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - name: Verify release identity
+        run: node scripts/check-release.mjs "${GITHUB_REF_NAME#v}"
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
-      - name: Verify release identity
-        run: node scripts/check-release.mjs "${GITHUB_REF_NAME#v}"
+      - run: node --test scripts/prepare-release-assets.test.mjs
       - run: bun run pack:cli
-      - run: bun run smoke:cli
-      - name: Publish primary package
-        run: npm publish ./design-rover-*.tgz --provenance --access public
+      # npm publishing is a separate maintainer action. A tag never republishes a version.
+      - name: Prepare the published npm artifact and checksum
+        run: node scripts/prepare-release-assets.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/design-rover-release"
+      - name: Smoke test the exact release artifact
+        run: node scripts/smoke-cli.mjs "$RUNNER_TEMP/design-rover-release/design-rover-${GITHUB_REF_NAME#v}.tgz"
+      - name: Create GitHub release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          flags=()
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
+          if [[ -f "docs/releases/$GITHUB_REF_NAME.md" ]]; then
+            flags+=(--notes-file "docs/releases/$GITHUB_REF_NAME.md")
+          else
+            flags+=(--generate-notes)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/design-rover-release/design-rover-$version.tgz" \
+            "$RUNNER_TEMP/design-rover-release/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Design Rover $version" \
+            "${flags[@]}"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}

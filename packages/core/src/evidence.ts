@@ -15,7 +15,7 @@ export type ImportHit = {
   source: string
   names: string[]
   defaultName?: string
-  bindings?: { local: string; imported: string }[]
+  bindings?: { local: string; imported: string; isTypeOnly?: boolean }[]
   isTypeOnly: boolean
 }
 
@@ -40,6 +40,7 @@ export type ExtractedProp = {
   type?: string
   required: boolean
   values?: string[]
+  defaultValue?: string
 }
 
 export type ExtractedComponent = {

@@ -28,7 +28,7 @@ export function renderContext(
     "",
     "Before changing UI:",
     "1. Run `design-rover status --json` to inspect freshness and pending review.",
-    "2. Use `design-rover query <name> --json` to find components, tokens, conventions and exceptions. Use `design-rover explain <id>` for details and source locations.",
+    "2. Use `design-rover context <task> --path <file-or-directory> --json` for bounded, relevant components, tokens and approved decisions. Inspect coverage and omission warnings; raise --max-chars or narrow the request when approved decisions are omitted. Use `design-rover query <id> --json` for whole records or `design-rover explain <id>` for readable details and source locations.",
     "3. Read the relevant implementation before using its imports, props and variants. A component name can exist in several packages; choose by ID and source.",
     "4. Use approved conventions and exceptions in their documented scope. Observed code is evidence; inferred or suggested entries need review before becoming policy.",
     "5. Match the relevant token scope and theme. Missing or unresolved information is not permission to invent an API or claim a rule was checked.",

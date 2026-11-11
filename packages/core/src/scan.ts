@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import fg from "fast-glob"
 import ignore from "ignore"
+import ts from "typescript"
 import { sha256 } from "./hash.ts"
 import { relativePosix, toPosix } from "./paths.ts"
 import { readText } from "./fs.ts"
@@ -97,10 +98,12 @@ export async function loadTsconfigPaths(
   const raw = await readText(path.join(root, "tsconfig.json"))
   if (!raw) return {}
   try {
-    const parsed = JSON.parse(raw) as {
+    const parsed = ts.parseConfigFileTextToJson("tsconfig.json", raw).config as {
       compilerOptions?: { paths?: Record<string, string[]> }
     }
-    return parsed.compilerOptions?.paths ?? {}
+    const paths = parsed?.compilerOptions?.paths
+    if (!paths || typeof paths !== "object" || Array.isArray(paths)) return {}
+    return Object.fromEntries(Object.entries(paths).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((value) => typeof value === "string")))
   } catch {
     return {}
   }

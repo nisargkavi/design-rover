@@ -1,5 +1,6 @@
 import path from "node:path"
 import type { FileEvidence, RepoEvidence } from "./evidence.ts"
+import { localModules } from "./local-modules.ts"
 
 type ComponentIdentity = { name: string; source: string; exportName: string; importPath?: string }
 const withoutExtension = (file: string) => file.replace(/\.(?:tsx?|jsx?|mts|cts|mjs|cjs)$/, "")
@@ -36,16 +37,25 @@ export function resolveComponent<T extends ComponentIdentity>(
   const imports = file.imports.filter((item) => !item.isTypeOnly)
   let bound = false
   const matches = new Set<T>()
+  const graph = localModules(evidence)
   for (const item of imports) {
-    const bindings = item.bindings ?? [
+    const bindings: { local: string; imported: string; isTypeOnly?: boolean }[] = item.bindings ?? [
       ...item.names.map((name) => ({ local: name, imported: name })),
       ...(item.defaultName ? [{ local: item.defaultName, imported: "default" }] : []),
     ]
     const binding = bindings.find((value) => value.local === local)
     if (!binding) continue
     bound = true
+    if (binding.isTypeOnly) continue
     if ((binding.imported === "*") !== Boolean(member)) continue
     const exported = member ?? binding.imported
+    const resolution = graph.resolveExport(file.relative, item.source, exported, "value")
+    if (resolution.module) {
+      if (resolution.issues.length || resolution.targets.length !== 1) continue
+      const target = resolution.targets[0]!
+      for (const component of components) if (component.source === target.file && component.name === target.name) matches.add(component)
+      continue
+    }
     const modules = targets(evidence, file.relative, item.source)
     for (const component of components) {
       const moduleMatch = (!item.source.startsWith(".") && component.importPath === item.source) || modules.some((target) => {

@@ -40,6 +40,7 @@ function componentSig(record: ComponentRecord) {
     source: record.source,
     importPath: record.importPath,
     exportName: record.exportName,
+    propsResolution: record.propsResolution,
   }
 }
 

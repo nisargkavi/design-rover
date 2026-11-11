@@ -20,7 +20,7 @@ function run(command, args, options = {}) {
 
 try {
   // Install the unpublished release artifact in an isolated Bun project.
-  const primaryTarball = `file:${path.join(project, `design-rover-${version}.tgz`)}`
+  const primaryTarball = `file:${path.resolve(process.argv[2] ?? path.join(project, `design-rover-${version}.tgz`))}`
   await fs.writeFile(path.join(temporary, "package.json"), JSON.stringify({
     private: true,
     dependencies: {
@@ -43,6 +43,13 @@ try {
   assert.equal(status.syncStatus, "synchronized")
   assert.deepEqual(status.staleGenerated, [])
   assert.equal(json(["check"]).preservedArchitecture, true)
+  const contextOutput = call(cli, ["context", "Button", "--path", "app/dashboard/page.tsx", "--max-chars", "18000", "--json"])
+  const context = JSON.parse(contextOutput)
+  assert.ok(contextOutput.length <= 18000)
+  assert.equal(context.limits.outputChars, contextOutput.length)
+  assert.equal(context.freshness.checked, false)
+  assert.ok(context.matches.some((item) => item.kind === "component" && item.record.name === "Button"))
+  assert.match(json(["context", "--path", "../outside"], 1).error, /cannot leave/)
   assert.equal(json(["ci", "--fail-on", "warning"], 1).ok, false)
   assert.equal(json(["ci", "--fail-on", "none"]).ok, true)
   assert.match(json(["ci", "--fail-on", "typo"], 1).error, /fail-on/)
@@ -59,11 +66,17 @@ try {
   const transport = new StdioClientTransport({ command: process.execPath, args: [cli, "mcp", "--cwd", fixture] })
   try {
     await client.connect(transport)
-    assert.equal((await client.listTools()).tools.length, 9)
+    assert.equal((await client.listTools()).tools.length, 10)
     const response = await client.callTool({ name: "get_system", arguments: {} })
     assert.notEqual(response.isError, true)
+    const scoped = await client.callTool({ name: "get_context", arguments: { query: "Button", path: "app/dashboard/page.tsx", maxChars: 6000 } })
+    assert.notEqual(scoped.isError, true)
+    const scopedText = scoped.content.find((item) => item.type === "text").text
+    assert.ok(scopedText.length <= 6000)
+    assert.equal(JSON.parse(scopedText).limits.outputChars, scopedText.length)
+    assert.equal(JSON.parse(scopedText).scope.path, "app/dashboard/page.tsx")
   } finally { await client.close() }
-  console.log(`Packaged CLI ${version}: init/generate/check, JSON gates, baseline preservation and stdio MCP passed.`)
+  console.log(`Packaged CLI ${version}: init/generate/check, bounded context, JSON gates, baseline preservation and stdio MCP passed.`)
 } finally {
   await fs.rm(temporary, { recursive: true, force: true })
 }

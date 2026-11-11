@@ -1,5 +1,6 @@
 import path from "node:path"
 import { nowIso, type CanonicalModel, type StatusReport } from "@design-rover/model"
+import { retrieveContext, type ContextOptions } from "./retrieval.ts"
 import { analyzeRepository, type AnalyzeOptions } from "./analyze.ts"
 import { captureBaseline, checkSnippet, checkSystem } from "./check.ts"
 import { usageDiagnostics } from "./usage-check.ts"
@@ -181,6 +182,11 @@ export async function createEngine(root: string) {
       const model = await loadCanonical(root)
       if (!model) return undefined
       return searchModel(model, query)
+    },
+    context: async (options: ContextOptions = {}) => {
+      const model = await loadCanonical(root)
+      if (!model) throw new Error("Design Rover is not initialized. Run `design-rover init` before retrieving context.")
+      return retrieveContext(model, options)
     },
     history: () => history(root),
     checkSnippet: async (code: string, fileName: string) => {

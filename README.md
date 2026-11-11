@@ -1,5 +1,10 @@
 # Design Rover
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/readme-banner-dark.svg">
+  <img src="assets/brand/readme-banner.svg" alt="Design Rover: design knowledge for people and coding agents." width="1600">
+</picture>
+
 [![CI and release](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml/badge.svg?branch=main)](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml)
 [![npm version](https://img.shields.io/npm/v/design-rover)](https://www.npmjs.com/package/design-rover)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

@@ -1,5 +1,7 @@
 # Design Rover
 
+[![Design Rover: design knowledge for people and coding agents](https://raw.githubusercontent.com/nisargkavi/design-rover/main/assets/brand/readme-banner.png)](https://github.com/nisargkavi/design-rover)
+
 Design knowledge from your existing React/TypeScript codebase, available to people and coding agents.
 
 Run from the project you want to analyze. Requires Bun and Node >=20.19.0; no global installation is needed.

@@ -34,7 +34,8 @@ export function usageDiagnostics(
     for (const jsx of file.jsx) {
       const component = resolveComponent(evidence, file, jsx.tag, components, options)
       if (!component) continue
-      const overrides = jsx.classes.filter(looksLikeSpacingOverride)
+      const inlineOverrides = (jsx.styleProperties ?? []).filter((property) => /^(?:padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|height|width|gap|rowGap|columnGap)$/.test(property)).map((property) => `style:${property}`)
+      const overrides = [...jsx.classes.filter(looksLikeSpacingOverride), ...inlineOverrides]
       if (component.sizes.length && overrides.length && !exceptionAllows(canonical, file.relative, component, "restyle-spacing", overrides)) {
         diagnostics.push({
           id: `restyle-${component.name}-${file.relative}-${jsx.startLine}`,
@@ -44,7 +45,7 @@ export function usageDiagnostics(
           related: `Sizes: ${component.sizes.join(", ") || "none"}. ${overrides.join(" ")}. Import: ${component.importPath}`,
           action: `Consider size="${component.sizes.includes("lg") ? "lg" : component.sizes[0]}". No code was modified.`,
           certainty: "inferred",
-          fingerprint: shortHash(`restyle:${component.id === entityId("component", component.name) ? component.name : component.id}:${file.relative}:${jsx.classes.join(" ")}`),
+          fingerprint: shortHash(`restyle:${component.id === entityId("component", component.name) ? component.name : component.id}:${file.relative}:${jsx.classes.join(" ")}${inlineOverrides.length ? `:${inlineOverrides.join(" ")}` : ""}`),
           location: { file: file.relative, startLine: jsx.startLine },
           baseline: false,
         })

@@ -1,17 +1,23 @@
 import { entityId, type ExceptionRecord } from "@design-rover/model"
 import { isArbitrary, isRawPaletteColor } from "../classes.ts"
 import type { RepoEvidence } from "../evidence.ts"
+import { shortHash } from "../hash.ts"
+import { normalizeEvidence } from "../knowledge-identity.ts"
 
 const EXPLICIT =
   /design-rover(?:-ignore|:exception|:allow)/i
 
 export function analyzeExceptions(evidence: RepoEvidence): ExceptionRecord[] {
   const exceptions: ExceptionRecord[] = []
+  const anchors = new Map<string, number>()
 
   for (const file of evidence.files) {
     for (const comment of file.comments) {
       if (!EXPLICIT.test(comment.text)) continue
-      const id = entityId("exception", `${file.relative}-${comment.startLine}`)
+      const anchor = `${file.relative}-${shortHash(normalizeEvidence(comment.text), 16)}`
+      const occurrence = (anchors.get(anchor) ?? 0) + 1
+      anchors.set(anchor, occurrence)
+      const id = entityId("exception", `${anchor}${occurrence > 1 ? `-${occurrence}` : ""}`)
       exceptions.push({
         id,
         name: `Explicit exception in ${file.relative}`,

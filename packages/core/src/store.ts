@@ -24,8 +24,13 @@ import {
 } from "@design-rover/model"
 import { pathExists } from "./fs.ts"
 import { specPaths } from "./paths.ts"
+import { assertSafeWritePaths } from "./write-paths.ts"
 
 type Parser<T> = { parse(value: unknown): T }
+
+export class CanonicalConflictError extends Error {
+  readonly code = "CANONICAL_CONFLICT"
+}
 
 async function listJsonFiles(dir: string): Promise<string[]> {
   try {
@@ -104,6 +109,46 @@ export async function isInitialized(root: string): Promise<boolean> {
   return pathExists(specPaths(root).system)
 }
 
+async function assertCanonicalStorageSafe(root: string): Promise<void> {
+  const dir = specPaths(root).dir
+  await assertSafeWritePaths(root, [dir])
+  if (!(await pathExists(dir))) return
+  const targets: string[] = []
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return []
+      throw error
+    })
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name)
+      targets.push(target)
+      if (entry.isDirectory()) await visit(target)
+    }
+  }
+  await visit(dir)
+  await assertSafeWritePaths(root, targets)
+}
+
+async function assertNoOrphanedKnowledge(root: string): Promise<void> {
+  const paths = specPaths(root)
+  const directories = [paths.tokens, paths.components, paths.patterns, paths.conventions, paths.intents, paths.exceptions]
+  const hasRecords = (await Promise.all(directories.map(listJsonFiles))).some((files) => files.length > 0)
+  const hasState = (await Promise.all([paths.rejections, paths.baseline, paths.sources, paths.discrepancies, paths.historyLog]
+    .map(pathExists))).some(Boolean)
+  if (hasRecords || hasState) throw new Error(`Canonical system metadata is missing (${paths.system}), but existing knowledge or decisions remain. Recover system.json from a backup before initializing; existing records were left unchanged.`)
+}
+
+async function assertNoInterruptedSave(root: string): Promise<void> {
+  const paths = specPaths(root)
+  const recoveryMarker = path.join(paths.dir, ".recovery-required.json")
+  if (await pathExists(recoveryMarker)) throw new Error(`Canonical storage needs recovery. Inspect ${recoveryMarker} before continuing.`)
+  for (const entry of await fs.readdir(paths.dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(".write-") && await pathExists(path.join(paths.dir, entry.name, "recovery.json"))) {
+      throw new Error(`Canonical storage has an interrupted save. Inspect ${path.join(paths.dir, entry.name, "recovery.json")} and recover its backup before continuing.`)
+    }
+  }
+}
+
 async function acquireCanonicalLock(lockFile: string): Promise<Awaited<ReturnType<typeof fs.open>>> {
   const timeoutMs = 1500
   const deadline = performance.now() + timeoutMs
@@ -124,9 +169,11 @@ async function acquireCanonicalLock(lockFile: string): Promise<Awaited<ReturnTyp
 
 async function loadCanonicalUnlocked(root: string): Promise<CanonicalModel | undefined> {
   const paths = specPaths(root)
-  const recoveryMarker = path.join(paths.dir, ".recovery-required.json")
-  if (await pathExists(recoveryMarker)) throw new Error(`Canonical storage needs recovery. Inspect ${recoveryMarker} before continuing.`)
-  if (!(await pathExists(paths.system))) return undefined
+  await assertNoInterruptedSave(root)
+  if (!(await pathExists(paths.system))) {
+    await assertNoOrphanedKnowledge(root)
+    return undefined
+  }
   const system = await readJsonStrict<SystemRecord | undefined>(paths.system, undefined)
   if (!system) throw new Error(`Invalid canonical system ${paths.system}.`)
   const history = await readHistory(paths.historyLog)
@@ -153,6 +200,7 @@ export async function loadCanonical(root: string): Promise<CanonicalModel | unde
   const paths = specPaths(root)
   // Reading an uninitialized repository must not create a canonical directory.
   if (!(await pathExists(paths.dir))) return undefined
+  await assertCanonicalStorageSafe(root)
   const lockFile = path.join(paths.dir, ".write.lock")
   const lock = await acquireCanonicalLock(lockFile)
   try { return await loadCanonicalUnlocked(root) }
@@ -162,9 +210,10 @@ export async function loadCanonical(root: string): Promise<CanonicalModel | unde
   }
 }
 
-export async function saveCanonical(root: string, model: CanonicalModel): Promise<void> {
+export async function saveCanonical(root: string, model: CanonicalModel, options: { expected?: CanonicalModel | null } = {}): Promise<CanonicalModel> {
   model = validateCanonical(model)
   const paths = specPaths(root)
+  await assertCanonicalStorageSafe(root)
   await fs.mkdir(paths.dir, { recursive: true })
   const lockFile = path.join(paths.dir, ".write.lock")
   const lock = await acquireCanonicalLock(lockFile)
@@ -172,15 +221,14 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
   let retainRecovery = false
   try {
     // Refuse to overwrite or prune unreadable existing knowledge.
-    if (await pathExists(paths.system)) await loadCanonicalUnlocked(root)
-    else {
-      await readRecords(paths.tokens, TokenRecordSchema)
-      await readRecords(paths.components, ComponentRecordSchema)
-      await readRecords(paths.patterns, PatternRecordSchema)
-      await readRecords(paths.conventions, ConventionRecordSchema)
-      await readRecords(paths.intents, IntentRecordSchema)
-      await readRecords(paths.exceptions, ExceptionRecordSchema)
+    const current = await loadCanonicalUnlocked(root)
+    if ("expected" in options) {
+      const expected = options.expected ? stableStringify(validateCanonical(options.expected)) : null
+      const actual = current ? stableStringify(current) : null
+      if (actual !== expected) throw new CanonicalConflictError("Canonical model changed during this operation. No decisions were saved. Reload the model and review the change again.")
     }
+    // Runtime paths come from the engine root, not one developer's checkout.
+    model = { ...model, system: { ...model.system, repository: { ...model.system.repository, root: "." } } }
     const writes = new Map<string, string>()
     const obsolete: string[] = []
     for (const [dir, records] of [
@@ -213,6 +261,7 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
     writes.set(paths.historyLog, history.map((event) => JSON.stringify(event)).join("\n") + (history.length ? "\n" : ""))
     // Write all bytes before replacing any file, and prune only after every replacement succeeds.
     writes.set(paths.system, stableStringify(model.system))
+    await assertSafeWritePaths(root, [...writes.keys(), ...obsolete, path.join(paths.dir, ".recovery-required.json")])
     staging = await fs.mkdtemp(path.join(paths.dir, ".write-"))
     const staged: [string, string][] = []
     for (const [destination, content] of writes) {
@@ -235,6 +284,15 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
       canonicalDirectory: paths.dir,
       files: recovery.map((item) => ({ path: path.relative(paths.dir, item.destination), backup: item.backup ? path.basename(item.backup) : null })),
     }, null, 2))
+    const marker = path.join(paths.dir, ".recovery-required.json")
+    const journal = await fs.open(marker, "wx")
+    try {
+      await journal.writeFile(JSON.stringify({ backup: staging, manifest: path.join(staging, "recovery.json"), state: "installing" }, null, 2))
+      await journal.sync()
+    } catch (error) {
+      await fs.rm(marker, { force: true })
+      throw error
+    } finally { await journal.close() }
     try {
       for (const [temporary, destination] of staged) {
         await fs.mkdir(path.dirname(destination), { recursive: true })
@@ -242,6 +300,7 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
       }
       for (const file of obsolete) await fs.rm(file)
       await fs.mkdir(paths.generated, { recursive: true })
+      await fs.rm(marker)
     } catch (error) {
       const failures: unknown[] = []
       for (const [index, item] of recovery.entries()) {
@@ -257,12 +316,13 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
       }
       if (failures.length) {
         retainRecovery = true
-        const marker = path.join(paths.dir, ".recovery-required.json")
         await fs.writeFile(marker, JSON.stringify({ backup: staging, manifest: path.join(staging, "recovery.json") }, null, 2))
         throw new AggregateError([error, ...failures], `Canonical save and rollback failed. Retained recovery backup at ${staging}; inspect ${marker}.`)
       }
+      await fs.rm(marker, { force: true })
       throw error
     }
+    return { ...model, history }
   } finally {
     if (staging && !retainRecovery) await fs.rm(staging, { recursive: true, force: true })
     await lock.close()
@@ -277,7 +337,7 @@ export function emptyCanonical(root: string, name: string): CanonicalModel {
       version: 1,
       createdAt: ts,
       updatedAt: ts,
-      repository: { name, root },
+      repository: { name, root: "." },
       framework: { name: "unknown" },
       styling: { systems: [] },
       componentLibraries: [],

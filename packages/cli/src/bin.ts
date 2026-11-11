@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util"
 import path from "node:path"
-import { createEngine, isInitialized, serializeContext } from "@design-rover/core"
+import { createEngine, isInitialized, serializeContext, gateGeneratedStale } from "@design-rover/core"
 import { CLI_VERSION, type CanonicalModel, type ModelChange, type ObservedSnapshot } from "@design-rover/model"
 import { mapShadcnLint, oxlintFromMap, reconcileSources } from "@design-rover/integrations"
 import * as clack from "@clack/prompts"
@@ -51,8 +51,8 @@ Usage
   design-rover serve           Local API for Studio / agents
   design-rover studio          Open the companion web UI
   design-rover mcp             Start the MCP server
-  design-rover approve [id]    Approve pending inferences
-  design-rover reject <id>     Remember a rejected inference
+  design-rover approve [id]    Accept a proposal or approve a component/record
+  design-rover reject <id>     Reject an inference or revoke an approval
 
 Options
   --json          Machine-readable output
@@ -95,6 +95,7 @@ Usage
 
 Preview observed changes and pending inferences. No changes are applied without
 interactive confirmation or --yes. Pending inferences require explicit approval.
+Approved or human-annotated removals require approve <change-id>, even with --approve.
 
 Options
   --yes           Accept observed inventory and updates to already trusted knowledge
@@ -153,9 +154,17 @@ function observedSyncChange(change: ModelChange): boolean {
   return change.entity === "component" || change.entity === "token" || before?.status === "approved" || before?.status === "observed"
 }
 
+function protectedRemoval(change: ModelChange): boolean {
+  const before = change.before as { status?: string; notes?: string; approvedBy?: string; originKind?: string } | undefined
+  return change.kind === "remove" && Boolean(before && (before.status === "approved" || before.notes !== undefined || before.approvedBy !== undefined || before.originKind === "human"))
+}
+
 async function main() {
+  const args = process.argv.slice(2)
+  const boundary = args.indexOf("--")
+  setJson((boundary < 0 ? args : args.slice(0, boundary)).some((arg) => arg === "--json" || arg.startsWith("--json=")))
   const parsed = parseArgs({
-    args: process.argv.slice(2),
+    args,
     allowPositionals: true,
     options: {
       json: { type: "boolean", default: false },
@@ -232,7 +241,7 @@ async function main() {
     const preview = await engine.syncPreview({ incremental: true, base: parsed.values.base })
     if (!preview.model) fail("Design Rover is not initialized. Run " + cliCommand("init", commandCwd) + ".")
     const workflow = workflowFor(preview.model, preview.diff.generated.stale, commandCwd)
-    const selected = preview.diff.changes.filter((change) => parsed.values.approve ? change.entity !== "projection" : observedSyncChange(change))
+    const selected = preview.diff.changes.filter((change) => !protectedRemoval(change) && (parsed.values.approve ? change.entity !== "projection" : observedSyncChange(change)))
     if (!isJson()) printDiff(preview.diff, workflow)
     if (!parsed.values.yes) {
       if (!selected.length) {
@@ -436,7 +445,7 @@ async function main() {
     const fresh = result.report.diagnostics.filter((item) => !item.baseline)
     const errors = fresh.filter((item) => item.severity === "error")
     const warnings = fresh.filter((item) => item.severity === "warning")
-    const stale = await engine.generatedStale()
+    const stale = await gateGeneratedStale(root, result.model)
     const shouldFail = failOn === "none" ? false : failOn === "warning" ? errors.length + warnings.length + stale.length > 0 : errors.length + stale.length > 0
     if (isJson()) {
       emit({
@@ -510,8 +519,10 @@ async function main() {
       }
       const result = await engine.check()
       const errors = result.report.diagnostics.filter((item) => !item.baseline && item.severity === "error")
-      if (errors.length) {
+      const stale = await gateGeneratedStale(root, result.model)
+      if (errors.length || stale.length) {
         printCheck(result.report)
+        for (const file of stale) line(`  Stale required guidance: ${file}. Run ${cliCommand("generate", commandCwd)}.`)
         process.exitCode = 1
       }
       return
@@ -526,7 +537,7 @@ async function main() {
     if (rest[0] === "install") {
       const { writeText } = await import("@design-rover/core")
       const dest = path.join(engine.specDir, "generated/oxlintrc.shadcn.json")
-      await writeText(dest, oxlintFromMap(mapping))
+      await writeText(dest, oxlintFromMap(mapping), root)
       header()
       line(`  Wrote ${dest}`)
       line("  This is a recommendation. @shadcn/lint stays optional.")

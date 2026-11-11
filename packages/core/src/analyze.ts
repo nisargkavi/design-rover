@@ -68,7 +68,7 @@ export async function analyzeRepository(
   }
 
   const nextCache: FileCache = {
-    version: 5,
+    version: 6,
     hash: sha256(merged.files.map((file) => `${file.relative}\0${file.hash}`).join("\0")),
     files: merged.files,
   }

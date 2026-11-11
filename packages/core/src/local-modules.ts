@@ -2,7 +2,7 @@ import path from "node:path"
 import ts from "typescript"
 import type { RepoEvidence } from "./evidence.ts"
 
-export type LocalTarget = { file: string; name: string }
+export type LocalTarget = { file: string; name: string; exportName?: string }
 export type ExportResolution = { module?: string; targets: LocalTarget[]; issues: string[] }
 type Kind = "type" | "value"
 type Binding = { source?: string; imported: string; typeOnly: boolean }
@@ -41,6 +41,29 @@ export class LocalModules {
 
   source(file: string): ts.SourceFile | undefined {
     return this.module(file)?.source
+  }
+
+  /** Candidate imports are accepted only when they resolve back to this source. */
+  importPaths(file: string): string[] {
+    const source = normalize(file)
+    const stem = source.replace(/\.(?:tsx?|jsx?|mts|cts|mjs|cjs)$/, "")
+    const forms = [...new Set([source, stem, ...(stem.endsWith("/index") ? [stem.slice(0, -6)] : [])])]
+    const imports: string[] = []
+    for (const [alias, targets] of Object.entries(this.evidence.tsconfigPaths)) {
+      for (const target of targets) {
+        const pattern = normalize(path.posix.join(this.baseUrl, target))
+        const star = pattern.indexOf("*")
+        if (star < 0) { imports.push(alias); continue }
+        const prefix = pattern.slice(0, star)
+        const suffix = pattern.slice(star + 1)
+        for (const form of forms) if (form.startsWith(prefix) && form.endsWith(suffix)) {
+          const rest = form.slice(prefix.length, suffix ? -suffix.length : undefined)
+          imports.push(alias.replace("*", rest))
+        }
+      }
+    }
+    imports.push(`./${stem}`)
+    return [...new Set(imports)].filter((specifier) => this.resolveModule("__design_rover_import__.tsx", specifier) === source)
   }
 
   resolveModule(from: string, specifier: string): string | undefined {
@@ -89,7 +112,7 @@ export class LocalModules {
     const cached = this.resolutions.get(key)
     if (cached) return cached
     const result = this.exported(module, name, kind, new Set())
-    const distinct = [...new Map(result.targets.map((target) => [JSON.stringify(target), target])).values()]
+    const distinct = [...new Map(result.targets.map((target) => [JSON.stringify([target.file, target.name]), target])).values()]
     const issues = [...new Set(result.issues)]
     if (distinct.length > 1) issues.push(`Ambiguous ${kind} export ${name} in ${module}; multiple declarations match.`)
     const resolution = { module, targets: distinct, issues }
@@ -177,7 +200,7 @@ export class LocalModules {
     const explicit = module.exports.get(name)?.filter((binding) => !(kind === "value" && binding.typeOnly))
     if (explicit?.length) {
       const results = explicit.map((binding) => this.binding(file, binding, kind, next))
-      return { targets: results.flatMap((result) => result.targets), issues: results.flatMap((result) => result.issues) }
+      return { targets: results.flatMap((result) => result.targets.map((target) => target.file === file ? { ...target, exportName: name } : target)), issues: results.flatMap((result) => result.issues) }
     }
     if (name === "default") return { targets: [], issues: [] }
     const results = module.stars.filter((star) => !(kind === "value" && star.typeOnly)).map((star) => this.binding(file, { source: star.source, imported: name, typeOnly: star.typeOnly }, kind, next))

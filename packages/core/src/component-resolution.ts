@@ -53,7 +53,7 @@ export function resolveComponent<T extends ComponentIdentity>(
     if (resolution.module) {
       if (resolution.issues.length || resolution.targets.length !== 1) continue
       const target = resolution.targets[0]!
-      for (const component of components) if (component.source === target.file && component.name === target.name) matches.add(component)
+      for (const component of components) if (component.source === target.file && component.name === target.name && (!target.exportName || component.exportName === target.exportName)) matches.add(component)
       continue
     }
     const modules = targets(evidence, file.relative, item.source)

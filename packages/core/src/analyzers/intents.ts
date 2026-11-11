@@ -1,10 +1,18 @@
 import { entityId, type IntentRecord } from "@design-rover/model"
 import type { RepoEvidence } from "../evidence.ts"
+import { shortHash } from "../hash.ts"
+import { normalizeEvidence } from "../knowledge-identity.ts"
 
 const TODO_RE = /TODO|FIXME|replace with production|placeholder|temp image/i
 
 export function analyzeIntents(evidence: RepoEvidence): IntentRecord[] {
   const intents: IntentRecord[] = []
+  const anchors = new Map<string, number>()
+  const anchoredId = (anchor: string) => {
+    const occurrence = (anchors.get(anchor) ?? 0) + 1
+    anchors.set(anchor, occurrence)
+    return entityId("intent", `${shortHash(anchor, 16)}${occurrence > 1 ? `-${occurrence}` : ""}`)
+  }
 
   for (const file of evidence.files) {
     const todoComments = file.comments.filter((item) => TODO_RE.test(item.text))
@@ -25,7 +33,7 @@ export function analyzeIntents(evidence: RepoEvidence): IntentRecord[] {
         (/(^|\/)page\.(t|j)sx?$/.test(file.relative) ? "Page" : image.tag)
 
       const subject = `${subjectBase}.visual`
-      const id = entityId("intent", `${subject}-${file.relative}-${image.startLine}`)
+      const id = anchoredId(JSON.stringify([file.relative, subject, image.tag, image.src ?? "", normalizeEvidence(nearbyTodo?.text ?? "")]))
       intents.push({
         id,
         subject,
@@ -64,7 +72,7 @@ export function analyzeIntents(evidence: RepoEvidence): IntentRecord[] {
 
     for (const comment of todoComments) {
       if (!/a11y|aria|accessible/i.test(comment.text)) continue
-      const id = entityId("intent", `a11y-${file.relative}-${comment.startLine}`)
+      const id = anchoredId(JSON.stringify(["a11y", file.relative, normalizeEvidence(comment.text)]))
       intents.push({
         id,
         subject: `${file.relative}:accessibility`,

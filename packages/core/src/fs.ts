@@ -4,6 +4,7 @@ import path from "node:path"
 import fs from "node:fs/promises"
 import { SPEC_DIR } from "@design-rover/model"
 import { toPosix } from "./paths.ts"
+import { assertSafeWritePaths } from "./write-paths.ts"
 
 const exec = promisify(execFile)
 
@@ -110,12 +111,14 @@ export async function pathExists(filePath: string): Promise<boolean> {
 export async function readText(filePath: string): Promise<string | undefined> {
   try {
     return await fs.readFile(filePath, "utf8")
-  } catch {
-    return undefined
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    throw error
   }
 }
 
-export async function writeText(filePath: string, content: string): Promise<void> {
+export async function writeText(filePath: string, content: string, root = process.cwd()): Promise<void> {
+  await assertSafeWritePaths(root, [filePath])
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, content, "utf8")
 }

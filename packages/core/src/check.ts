@@ -13,6 +13,11 @@ function baselineSet(model: CanonicalModel): Set<string> {
   return new Set(model.baseline?.findings.map((item) => item.fingerprint) ?? [])
 }
 
+function publicContract(component: CanonicalModel["components"][number]) {
+  const { propsResolution: _, ...contract } = componentApiSignature(component)
+  return contract
+}
+
 export function checkSystem(
   observed: ObservedSnapshot,
   canonical: CanonicalModel,
@@ -26,16 +31,19 @@ export function checkSystem(
   const contractChanges = diffModels(observed, { ...canonical, rejections: [] }).changes
   for (const change of contractChanges.filter((item) => item.entity === "component" && (item.kind === "update" || item.kind === "remove"))) {
     const component = change.before as CanonicalModel["components"][number]
-    const contextOnly = change.kind === "update" && JSON.stringify(componentApiSignature(component)) === JSON.stringify(componentApiSignature(change.after as typeof component))
+    const after = change.after as typeof component | undefined
+    const contextOnly = change.kind === "update" && after && JSON.stringify(publicContract(component)) === JSON.stringify(publicContract(after))
+    const uncertain = change.kind === "update" && !contextOnly && after?.propsResolution?.status !== "resolved"
+    const approvedRegression = component.status === "approved" && !contextOnly && !uncertain
     if (component.status === "approved" || component.status === "observed") {
       push(diagnostics, baseline, changed, {
         id: `api-${component.id}`,
-        severity: "info",
-        title: `${component.name} ${change.kind === "remove" ? "is no longer observed" : contextOnly ? "design context changed" : "API changed"}`,
-        why: "The implementation no longer matches the canonical component model.",
+        severity: approvedRegression ? "error" : "info",
+        title: `${component.name} ${change.kind === "remove" ? "is no longer observed" : contextOnly ? "design context changed" : uncertain ? "API needs review" : "API changed"}`,
+        why: uncertain ? "Analysis could not fully resolve this API. Inspect its source before treating missing fields as a confirmed contract change." : "The implementation no longer matches the canonical component model.",
         related: change.details.join("; ") || `Canonical component: ${component.source}.`,
         action: "Run `design-rover sync` to review the model update. No code was modified.",
-        certainty: "certain",
+        certainty: uncertain ? "inferred" : "certain",
         fingerprint: change.fingerprint,
         location: { file: component.source },
       })
@@ -57,7 +65,7 @@ export function checkSystem(
         related: "Documented design intent, not a missing component.",
         action: placeholder ? "Replace the placeholder with a production asset before shipping, or keep the placeholder if this is still intentional." : "Inspect the source and review this requirement with design-rover sync.",
         certainty: placeholder ? "certain" : "inferred",
-        fingerprint: shortHash(`intent:${intent.subject}:${placeholder ? "placeholder" : "review"}`),
+        fingerprint: shortHash(`intent:${intent.id}:${source ?? ""}:${placeholder ? "placeholder" : "review"}`),
         location: current?.evidence[0]?.location ?? intent.evidence[0]?.location,
       })
     }

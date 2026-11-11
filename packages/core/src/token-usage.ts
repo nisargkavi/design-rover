@@ -39,8 +39,9 @@ export function classReferencesToken(className: string, tokenName: string, theme
     if (!theme) return false
   }
   const name = tokenName.replace(/^--/, "")
-  // Legacy/config keys keep their full name. Theme namespaces map to utilities below.
-  if (!theme) return base === name || base.endsWith(`-${name}`) || Boolean(base.split("/")[0]?.endsWith(`-${name}`))
+  // Configuration colors retain their complete flattened utility value. A
+  // global foreground must not match muted-foreground or primary-foreground.
+  if (!theme) return colorUtility.exec(base)?.[1]?.split("/")[0] === name
   if (name.startsWith("color-")) return colorUtility.exec(base)?.[1]?.split("/")[0] === name.slice(6)
   if (name.startsWith("breakpoint-")) return variants.some((variant) => [name.slice(11), `min-${name.slice(11)}`, `max-${name.slice(11)}`].includes(variant))
   if (name.startsWith("container-")) return base === `max-w-${name.slice(10)}` || variants.some((variant) => variant === `@${name.slice(10)}` || variant === `@max-${name.slice(10)}` || variant === `@min-${name.slice(10)}`)
@@ -58,4 +59,10 @@ export function classReferencesToken(className: string, tokenName: string, theme
     if (name.startsWith(prefix)) return base.split("/")[0] === `${utility}-${name.slice(prefix.length).split("--")[0]}`
   }
   return false
+}
+
+/** CSS var() references only; quoted content is literal text, not a dependency. */
+export function variableReferences(value: string): string[] {
+  const unquoted = value.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, "")
+  return [...new Set([...unquoted.matchAll(/\bvar\(\s*(--[^\s,)]+)\s*(?=[,)])/g)].map((match) => match[1]!))]
 }

@@ -3,6 +3,8 @@ import type { RepoEvidence } from "../evidence.ts"
 import { shortHash } from "../hash.ts"
 import { classReferencesToken, themeTokenNames } from "../token-usage.ts"
 import postcss from "postcss"
+import { tailwindColors } from "../tailwind-config.ts"
+import { variableReferences } from "../token-usage.ts"
 
 function categoryOf(name: string): TokenRecord["category"] {
   const n = name.replace(/^--/, "")
@@ -93,34 +95,35 @@ export function analyzeTokens(evidence: RepoEvidence): TokenRecord[] {
 
   for (const file of evidence.files) {
     if (!/tailwind\.config\./.test(file.relative)) continue
-    const themeBlock = file.content.match(/theme\s*:\s*\{([\s\S]*?)\n\s*\}/)
-    if (!themeBlock?.[1]) continue
-    const colorHits = [...themeBlock[1].matchAll(/([a-zA-Z0-9-]+)\s*:\s*["'`]([^"'`]+)["'`]/g)]
-    for (const hit of colorHits) {
-      const name = hit[1]
-      const value = hit[2]
-      if (!name || !value) continue
+    const extracted = tailwindColors(file.relative, file.content)
+    for (const color of extracted.colors) {
+      const { name } = color
+      const value = color.value ?? color.expression
       const id = `${entityId("token", name)}-${shortHash(JSON.stringify([name, ":root", file.relative]))}`
       if (tokens.has(id)) continue
       tokens.set(id, {
         id,
         name,
-        category: categoryOf(name),
+        category: categoryOf(`color-${name}`),
         value,
         origin: file.relative,
         usageCount: 0,
-        status: "observed",
-        confidence: "medium",
+        status: color.value === undefined ? "inferred" : "observed",
+        confidence: color.value === undefined ? "low" : "medium",
         originKind: "implementation",
+        notes: color.value === undefined
+          ? `Unresolved configuration expression, not a resolved token value: ${color.expression}. ${extracted.issues.join(" ")}`
+          : extracted.issues.length ? `Other configuration entries remain unresolved: ${extracted.issues.join(" ")}` : undefined,
         evidence: [
           {
             id: `${id}:config`,
             kind: "tailwind-config",
-            description: `Theme value ${name} = ${value}`,
-            location: { file: file.relative },
+            description: `${color.path.join(".")}: ${color.value === undefined ? "unresolved expression" : value}`,
+            location: { file: file.relative, startLine: color.line },
           },
         ],
       })
+      if (color.value !== undefined) for (const reference of variableReferences(color.value)) cssReferences.set(reference, (cssReferences.get(reference) ?? 0) + 1)
     }
   }
 

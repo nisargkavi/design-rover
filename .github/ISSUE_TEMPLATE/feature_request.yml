@@ -1,0 +1,36 @@
+name: Feature request
+description: Explain a task Design Rover could support better.
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first so we can discuss the right scope. See the [contribution guide](https://github.com/nisargkavi/design-rover/blob/main/CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task is difficult today?
+      description: Include a concrete example and any current workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the input and result you would expect. Mention relevant framework or styling conventions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How could we verify it?
+      description: Suggest a small example or acceptance criteria, and mention compatibility concerns or alternatives.
+  - type: checkboxes
+    id: reporting_checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this request.
+          required: true
+        - label: This public request contains no credentials, private project data, or undisclosed vulnerability details.
+          required: true

@@ -1,6 +1,6 @@
 # Design Rover
 
-[![CI](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml/badge.svg)](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml)
+[![CI and release](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml/badge.svg?branch=main)](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml)
 [![npm version](https://img.shields.io/npm/v/design-rover)](https://www.npmjs.com/package/design-rover)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -30,6 +30,8 @@ bunx design-rover check
 `init` writes `.design-rover/` and leaves inferred knowledge pending. Use `approve` without an ID only when you want to approve all reviewed proposals. After editing UI code, run `diff` and `sync` to review new observations. `sync --yes` skips the prompt; approving pending rules is a separate explicit choice.
 
 For example, if your Button already offers a large size, a custom padding override can produce a finding that points to that API. For a resolved prop, a change from optional to required appears in the model diff. Findings include source evidence so you can decide whether they apply.
+
+Approve a component ID to establish a reviewed API contract. Confirmed changes or removal then fail the default CI gate; observed inventory stays informational. Routine `sync` preserves approved or human-annotated removals until you explicitly accept their change ID. See [review and checking behavior](docs/usage.md#check-changes-and-adopt-gradually).
 
 ## Use with an AI agent
 
@@ -76,10 +78,11 @@ Use Bun 1.4.4 in this repository:
 bun install --frozen-lockfile
 bun run typecheck
 bun run test
+bun run test:scripts
 bun run pack:cli
 bun run smoke:cli
 ```
 
-See [development and releases](docs/development.md) for source commands, package validation and publishing. Issues and pull requests are welcome at [GitHub](https://github.com/nisargkavi/design-rover).
+Read the [contribution guide](CONTRIBUTING.md) before opening an issue or pull request. See [development and releases](docs/development.md) for source commands, package validation and publishing.
 
 [npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.3.1 release notes](docs/releases/v0.3.1.md) · [MIT license](LICENSE)

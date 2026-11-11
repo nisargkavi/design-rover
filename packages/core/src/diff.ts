@@ -14,6 +14,7 @@ import {
 } from "@design-rover/model"
 import { shortHash } from "./hash.ts"
 import { generatedHashes } from "./context.ts"
+import { decisionAnchor } from "./knowledge-identity.ts"
 
 function fingerprint(kind: string, id: string, payload: unknown): string {
   return shortHash(`${kind}:${id}:${JSON.stringify(payload)}`)
@@ -79,12 +80,12 @@ function intentSig(record: IntentRecord) {
   return {
     subject: record.subject,
     intentStatus: record.intentStatus,
-    sourceRefs: record.sourceRefs.map((item) => ({ kind: item.kind, description: item.description, snippet: item.snippet })),
+    sourceRefs: record.sourceRefs.map((item) => ({ kind: item.kind, description: item.description, snippet: item.snippet, location: item.location })),
   }
 }
 
 function exceptionSig(record: ExceptionRecord) {
-  return { evidence: record.evidence.map((item) => ({ kind: item.kind, description: item.description, file: item.location?.file })) }
+  return { evidence: record.evidence.map((item) => ({ kind: item.kind, description: item.description, location: item.location })) }
 }
 
 function rejected(canonical: CanonicalModel, fp: string): boolean {
@@ -99,6 +100,20 @@ function pushChange(
   const id = change.id ?? entityId("change", change.fingerprint)
   if (rejected(canonical, change.fingerprint)) return
   changes.push({ ...change, id })
+}
+
+export function explicitReviewChange(kind: EntityKind, record: { id: string; name?: string; subject?: string; confidence: "high" | "medium" | "low"; status: ModelChange["status"] }): ModelChange {
+  const signatures = { component: componentSig, token: tokenSig, pattern: patternSig, convention: conventionSig, intent: intentSig, exception: exceptionSig }
+  const signature = signatures[kind as keyof typeof signatures]
+  if (!signature) throw new Error(`Cannot review ${kind} as repository knowledge.`)
+  const fp = fingerprint(kind, recordIdentity(kind, record), signature(record as never))
+  const name = record.name ?? record.subject ?? record.id
+  return {
+    id: entityId("change", fp), kind: "update", entity: kind, name,
+    summary: `Review ${kind} ${name}`, details: ["Explicit review of an existing decision."],
+    fingerprint: fp, confidence: record.confidence, status: record.status, certain: false,
+    before: record, after: record,
+  }
 }
 
 export function diffModels(
@@ -299,6 +314,12 @@ function diffCollection<T extends { id: string; status: ModelChange["status"]; c
           incoming.occurrences.some((other) => occurrence.file === other.file && occurrence.fingerprint === other.fingerprint))
       })
       if (candidates.length === 1) current = candidates[0]
+    }
+    if (!current && (opts.kind === "exception" || opts.kind === "intent")) {
+      const anchor = decisionAnchor(opts.kind, item as unknown as ExceptionRecord | IntentRecord)
+      const candidates = anchor ? [...unmatched].filter((candidate) => decisionAnchor(opts.kind as "exception" | "intent", candidate as unknown as ExceptionRecord | IntentRecord) === anchor) : []
+      const observations = anchor ? opts.observed.filter((candidate) => decisionAnchor(opts.kind as "exception" | "intent", candidate as unknown as ExceptionRecord | IntentRecord) === anchor) : []
+      if (candidates.length === 1 && observations.length === 1) current = candidates[0]
     }
     if (!current) {
       pushChange(opts.changes, opts.model, {

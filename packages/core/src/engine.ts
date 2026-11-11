@@ -12,6 +12,7 @@ import { history, installGitHook, installGithubWorkflow } from "./integrations-l
 import { specDir } from "./paths.ts"
 import {
   emptyCanonical,
+  CanonicalConflictError,
   isInitialized,
   loadCanonical,
   saveCanonical,
@@ -44,16 +45,17 @@ export async function createEngine(root: string) {
     if (previous) {
       return { model: previous, snapshot, evidence, diff: await diffAgainstRepo(root, snapshot, previous) }
     }
-    let model = await seedCanonical(root, repoName(root), snapshot, emptyCanonical(root, repoName(root)))
+    let model = await seedCanonical(root, repoName(root), snapshot, emptyCanonical(root, repoName(root)), { generate: options.generate })
     if (options.approve) {
       model = await applyChanges(root, model, [], {
         approveInferred: true,
         generate: options.generate ?? false,
       })
     } else if (options.generate) {
+      const seeded = model
       const generated = await writeGenerated(root, model, { writeRepoFiles: true })
       model = { ...model, system: { ...model.system, generated: generated.files } }
-      await saveCanonical(root, model)
+      model = await saveCanonical(root, model, { expected: seeded })
     }
     const diff = await diffAgainstRepo(root, snapshot, model)
     return { model, snapshot, evidence, diff }
@@ -135,17 +137,23 @@ export async function createEngine(root: string) {
       baseline: captured,
       system: { ...result.model.system, updatedAt: nowIso() },
     }
-    await saveCanonical(root, model)
-    return model
+    return saveCanonical(root, model, { expected: result.model })
   }
 
   async function generate(options: { writeRepoFiles?: boolean } = {}) {
     const model = await loadCanonical(root)
     if (!model) throw new Error("Design Rover is not initialized. Run `design-rover init`.")
-    const generated = await writeGenerated(root, model, options)
-    const next = { ...model, system: { ...model.system, generated: generated.files, updatedAt: nowIso() } }
-    await saveCanonical(root, next)
-    return generated
+    await writeGenerated(root, model, { ...options, dryRun: true })
+    const reserved = await saveCanonical(root, { ...model, system: { ...model.system, updatedAt: nowIso() } }, { expected: model })
+    try {
+      const generated = await writeGenerated(root, reserved, options)
+      const next = { ...reserved, system: { ...reserved.system, generated: generated.files } }
+      await saveCanonical(root, next, { expected: reserved })
+      return generated
+    } catch (error) {
+      const reason = error instanceof CanonicalConflictError ? "Another writer changed the model before its projection manifest could be installed." : String(error)
+      throw new Error(`Canonical decisions were preserved, but generated guidance may be stale. Retry design-rover generate after other writers finish. ${reason}`)
+    }
   }
 
   return {

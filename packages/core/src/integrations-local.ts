@@ -120,7 +120,7 @@ export async function installGithubWorkflow(root: string): Promise<string> {
   })
   const currentText = await read(current)
   if (currentText !== undefined && currentText !== githubWorkflow()) throw new Error(`Workflow ${current} already exists. Review it before replacing it.`)
-  await writeText(current, githubWorkflow())
+  await writeText(current, githubWorkflow(), root)
   return current
 }
 

@@ -6,9 +6,10 @@ import { specPaths } from "./paths.ts"
 import { pathExists, readText } from "./fs.ts"
 import type { FileEvidence } from "./evidence.ts"
 import { sha256 } from "./hash.ts"
+import { assertSafeWritePaths } from "./write-paths.ts"
 
 export type FileCache = {
-  version: 5
+  version: 6
   hash: string
   files: FileEvidence[]
 }
@@ -25,7 +26,7 @@ const evidenceSchema = z.object({
   }).passthrough()),
   classes: z.array(z.object({ ...fileField, ...optionalLine, classes: strings, dynamic: z.boolean(), exported: z.boolean(), kind: z.enum(["jsx", "cva", "const", "css"]), componentName: z.string().optional() }).passthrough()),
   imports: z.array(z.object({ ...fileField, source: z.string(), names: strings, defaultName: z.string().optional(), isTypeOnly: z.boolean() }).passthrough()),
-  jsx: z.array(z.object({ ...fileField, tag: z.string(), isComponent: z.boolean(), classes: strings, attributes: z.record(z.string(), z.string()), startLine: z.number().int(), selfClosing: z.boolean() }).passthrough()),
+  jsx: z.array(z.object({ ...fileField, tag: z.string(), isComponent: z.boolean(), classes: strings, attributes: z.record(z.string(), z.string()), startLine: z.number().int(), selfClosing: z.boolean(), styleProperties: strings.optional() }).passthrough()),
   comments: z.array(z.object({ ...fileField, text: z.string(), startLine: z.number().int() }).passthrough()),
   sections: z.array(z.object({ ...fileField, nameHint: z.string().optional(), startLine: z.number().int(), tags: strings, components: strings, classFamilies: strings, childCount: z.number(), depth: z.number(), heading: z.string().optional() }).passthrough()),
   images: z.array(z.object({ ...fileField, tag: z.string(), src: z.string().optional(), startLine: z.number().int(), nextImage: z.boolean(), placeholder: z.boolean() }).passthrough()),
@@ -33,10 +34,11 @@ const evidenceSchema = z.object({
   exportedClassConstants: strings,
 }).passthrough()
 
-const cacheSchema = z.object({ version: z.literal(5), hash: z.string(), files: z.array(evidenceSchema) })
+const cacheSchema = z.object({ version: z.literal(6), hash: z.string(), files: z.array(evidenceSchema) })
 
 export async function loadCache(root: string): Promise<FileCache | undefined> {
   const file = path.join(specPaths(root).cache, "evidence.json")
+  await assertSafeWritePaths(root, [file])
   const raw = await readText(file)
   if (!raw) return undefined
   try {
@@ -56,8 +58,9 @@ export async function loadCache(root: string): Promise<FileCache | undefined> {
 export async function saveCache(root: string, cache: FileCache): Promise<void> {
   const directory = specPaths(root).cache
   const file = path.join(directory, "evidence.json")
-  await fs.mkdir(directory, { recursive: true })
   const temporary = path.join(directory, `evidence-${randomUUID()}.tmp`)
+  await assertSafeWritePaths(root, [directory, file, temporary])
+  await fs.mkdir(directory, { recursive: true })
   try {
     await fs.writeFile(temporary, `${JSON.stringify(cache)}\n`, "utf8")
     await fs.rename(temporary, file)
@@ -68,5 +71,6 @@ export async function saveCache(root: string, cache: FileCache): Promise<void> {
 
 export async function clearCache(root: string): Promise<void> {
   const dir = specPaths(root).cache
+  await assertSafeWritePaths(root, [dir])
   if (await pathExists(dir)) await fs.rm(dir, { recursive: true, force: true })
 }

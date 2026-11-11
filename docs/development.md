@@ -8,6 +8,7 @@ Use Bun 1.4.4 for dependency installation and workspace scripts. The packaged CL
 bun install --frozen-lockfile
 bun run typecheck
 bun run test
+bun run test:scripts
 bun run pack:cli
 bun run smoke:cli
 ```
@@ -17,6 +18,8 @@ The smoke check installs the packaged tarball into a fresh project and exercises
 ```sh
 bun run --filter @design-rover/web build
 ```
+
+`pack:cli` bundles workspace code, then stages a public manifest without development-only workspace dependencies. Source manifests stay unchanged. To keep validation artifacts outside the checkout, use `bun run pack:cli /absolute/path/to/artifacts` and `node scripts/smoke-cli.mjs /absolute/path/to/artifacts/design-rover-0.3.1.tgz`.
 
 Run the CLI from source without installing it globally:
 
@@ -41,21 +44,34 @@ Keep tests focused on observable behavior: full/incremental equivalence, unique 
 | `apps/server` | Experimental hosted snapshots |
 | `fixtures` and `tests` | Supported source examples and regression coverage |
 
-## Publish a release
+## Automated releases
 
-1. Update package and CLI versions together, add release notes, and validate the release identity with `node scripts/check-release.mjs <version>`.
-2. Run the validation commands above and inspect the tarball generated at the repository root.
-3. Publish the verified tarball to npm using an authenticated maintainer account:
+Maintainers squash-merge reviewed PRs after required checks pass. The final commit title determines the next version through [Conventional Commits](../CONTRIBUTING.md#open-a-pull-request): `fix:` requests a patch, `feat:` a minor, and `!` or a `BREAKING CHANGE:` footer a major. Documentation and maintenance commits do not request a release by themselves. Contributors leave version edits, tags and publication to the workflow.
 
-```sh
-npm publish ./design-rover-0.3.1.tgz --access public --tag latest
-bun run verify:published
-```
+A push to `main` starts the [Release workflow](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml):
 
-Replace the example version for a later release. npm publication is a separate authenticated action; pushing a Git tag does not republish an npm version. `verify:published` checks registry availability and the fresh-project entrypoint with an empty Bun cache.
+1. The reusable [test workflow](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml) validates Linux on Node 20, 22 and 24, and macOS on Node 24. It runs typechecking, library tests, release-script tests, packaging and the fresh-install smoke check.
+2. `semantic-release` reads `release.config.mjs`. The preparation plugin keeps curated release notes when present, generates missing notes, updates the public CLI version, matching constant, Bun lock entry and current documentation, then builds, packs and smoke-tests the release candidate. Private workspace versions stay unchanged.
+3. `@semantic-release/git` records those source changes in a release commit marked `[skip ci]`; semantic-release creates its matching `vX.Y.Z` tag.
+4. The publish plugin publishes `design-rover` to npm through trusted publishing, downloads the registry artifact, verifies its SHA512 integrity and package files against the local candidate, and smoke-tests the downloaded package.
+5. The verified package supplies the scoped GitHub Packages mirror, `@nisargkavi/design-rover`. A GitHub Release receives the exact verified npm tarball and `SHA256SUMS`.
 
-Push a matching version tag on the verified release commit to trigger the [GitHub Release workflow](https://github.com/nisargkavi/design-rover/actions/workflows/publish-cli.yml). It rebuilds/tests the tagged source, compares package files with the public npm artifact, and attaches that exact tarball and `SHA256SUMS` to the release.
+The publishing job uses Node 24, npm 11.20.0 and Bun 1.4.4. This does not change the packaged CLI's Node >=20.19.0 requirement. Follow the workflow's actual results to determine whether a release completed.
 
-The [test workflow](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml) checks supported Node versions on Linux and macOS using Bun for dependencies and scripts. Inspect its actual results before treating a pushed change as verified.
+### Maintainer setup
+
+The npm package owner configures a GitHub Actions trusted publisher for **user `nisargkavi`**, **repository `design-rover`**, and **workflow filename `publish-cli.yml`**. Allow direct `npm publish`, which this workflow uses; an optional environment name must match the workflow if one is configured later. Complete npm's account/2FA prompts when changing package settings. The job uses OIDC with `id-token: write`, so it does not require an `NPM_TOKEN` secret. See [npm's trusted-publisher setup](https://docs.npmjs.com/trusted-publishers/).
+
+The GitHub workflow token needs `contents: write` for release commits, tags and assets, and `packages: write` for the scoped mirror. After the first mirror publication, a maintainer checks its repository connection and package visibility: GitHub Packages defaults new packages to private. Installing from that registry requires authentication even for public packages; the unscoped npm package remains the usual installation path. See [GitHub's npm registry guidance](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry).
+
+### Resume an incomplete tagged release
+
+If a version tag exists but publication or release assets failed, fix the configuration or transient service problem, then:
+
+1. Open **Actions → Release → Run workflow**.
+2. Select the matching **`vX.Y.Z` tag**, and set **`resume_version` to `X.Y.Z`** without the `v`.
+3. Run the workflow and inspect validation and publication results.
+
+Validation runs again. The resume script verifies that the checked-out tree matches that tag, checks release identity, rebuilds and smoke-tests the candidate, then resumes publication. Existing npm or mirror versions must pass content verification before being reused. The final GitHub assets come from the verified npm download. A content mismatch requires a new fix release; the retry does not silently accept different package bytes.
 
 [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [Release notes](releases/v0.3.1.md)

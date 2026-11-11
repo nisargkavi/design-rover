@@ -63,7 +63,7 @@ describe("canonical lock contention", () => {
   it("queues a writer until an existing reader releases its lock", async () => {
     const { root, model, lockFile } = await fixture()
     const held = await fs.open(lockFile, "wx")
-    const updated = { ...model, system: { ...model.system, repository: { name: "updated" } } }
+    const updated = { ...model, system: { ...model.system, repository: { name: "updated", root: "." } } }
     let writeFinished = false
     const write = saveCanonical(root, updated).then(() => { writeFinished = true })
     try {

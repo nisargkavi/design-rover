@@ -66,8 +66,16 @@ export function splitClasses(value: string): string[] {
 }
 
 export function stripVariant(cls: string): string {
-  const parts = cls.split(":")
-  return parts[parts.length - 1] ?? cls
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < cls.length; index += 1) {
+    const char = cls[index]
+    if (char === "\\") { index += 1; continue }
+    if (char === "[" || char === "(") depth += 1
+    else if (char === "]" || char === ")") depth -= 1
+    else if (char === ":" && depth === 0) start = index + 1
+  }
+  return cls.slice(start).replace(/^!|!$/g, "")
 }
 
 export function isArbitrary(cls: string): boolean {
@@ -91,7 +99,9 @@ export function classFamily(cls: string): string {
 }
 
 export function looksLikeSpacingOverride(cls: string): boolean {
-  return /^(?:p|px|py|pt|pr|pb|pl|h|w|size|gap)-/.test(stripVariant(cls))
+  const base = stripVariant(cls)
+  if (/^(?:w|h|size)-(?:full|auto|fit|min|max|screen|dvw|dvh|svw|svh|lvw|lvh)$/.test(base)) return false
+  return /^(?:p|px|py|pt|pr|pb|pl|h|w|size|gap)-/.test(base)
 }
 
 export function looksLikeRadiusOverride(cls: string): boolean {

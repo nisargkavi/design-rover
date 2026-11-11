@@ -672,6 +672,11 @@ export function extractFileEvidence(input: {
               ? { classes: splitClasses(classAttr.initializer.text), dynamic: false }
               : { classes: [], dynamic: false }
           : { classes: [], dynamic: false }
+      const style = open.attributes.properties.find((property) => ts.isJsxAttribute(property) && property.name.getText() === "style")
+      const styleExpression = style && ts.isJsxAttribute(style) && style.initializer && ts.isJsxExpression(style.initializer) ? style.initializer.expression : undefined
+      const styleProperties = styleExpression && ts.isObjectLiteralExpression(styleExpression)
+        ? styleExpression.properties.flatMap((property) => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) ? [property.name.text] : [])
+        : []
       jsx.push({
         file: input.relative,
         tag,
@@ -680,6 +685,7 @@ export function extractFileEvidence(input: {
         attributes: attrs,
         startLine: lineOf(source, node),
         selfClosing: ts.isJsxSelfClosingElement(node),
+        styleProperties,
       })
       if (tag === "img" || tag === "Image") {
         images.push({
@@ -767,12 +773,49 @@ export function extractFileEvidence(input: {
     }
   }
 
+  // Resolve source-local export lists after traversal, including declarations
+  // that appear after their export statement. Keep the declaration name for
+  // type lookup and represent each concrete public export separately.
+  const topLevel = new Map<string, Set<number>>()
+  const exportedNames = new Map<string, Set<string>>()
+  const addExport = (local: string, exported: string) => {
+    const names = exportedNames.get(local) ?? new Set<string>()
+    names.add(exported)
+    exportedNames.set(local, names)
+  }
+  for (const statement of source.statements) {
+    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
+    const direct = modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      const lines = topLevel.get(statement.name.text) ?? new Set<number>()
+      lines.add(lineOf(source, statement))
+      topLevel.set(statement.name.text, lines)
+      if (direct) addExport(statement.name.text, modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ? "default" : statement.name.text)
+    }
+    if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue
+      const lines = topLevel.get(declaration.name.text) ?? new Set<number>()
+      lines.add(lineOf(source, declaration))
+      topLevel.set(declaration.name.text, lines)
+      if (direct) addExport(declaration.name.text, declaration.name.text)
+    }
+    if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && !statement.isTypeOnly && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+      for (const binding of statement.exportClause.elements) if (!binding.isTypeOnly) addExport(binding.propertyName?.text ?? binding.name.text, binding.name.text)
+    }
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals && ts.isIdentifier(statement.expression)) addExport(statement.expression.text, "default")
+  }
+  const publicComponents = components.flatMap((component) => {
+    const names = topLevel.get(component.name)?.has(component.startLine) ? exportedNames.get(component.name) : undefined
+    if (!names?.size) return [component]
+    return [...names].sort().map((name) => ({ ...component, exportName: name, isDefault: name === "default", exported: true }))
+  })
+
   return {
     relative: input.relative,
     hash: input.hash,
     kind: input.kind,
     content: input.content,
-    components,
+    components: publicComponents,
     classes,
     imports,
     jsx,

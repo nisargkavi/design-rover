@@ -12,7 +12,11 @@ const version = manifest.version
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "design-rover-package-"))
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: "utf8", timeout: 90_000, ...options })
+  const result = spawnSync(command, args, {
+    encoding: "utf8", timeout: 90_000,
+    env: { ...process.env, BUN_INSTALL_CACHE_DIR: path.join(temporary, "bun-cache") },
+    ...options,
+  })
   if (result.error) throw result.error
   assert.equal(result.status, options.expectedStatus ?? 0, `${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`)
   return result.stdout
@@ -38,7 +42,10 @@ try {
   assert.equal(run("bun", ["run", "design-rover", "--version"], { cwd: temporary }).trim(), version)
   const installed = JSON.parse(await fs.readFile(path.join(temporary, "node_modules/design-rover/package.json"), "utf8"))
   assert.deepEqual(installed.bin, { "design-rover": "./dist/bin.js" })
-  assert.equal(json(["init", "--approve", "--generate"]).pending, 0)
+  assert.equal(installed.devDependencies, undefined, "Published manifests must omit development-only workspaces")
+  assert.equal(JSON.stringify(installed).includes("workspace:"), false)
+  const initialized = JSON.parse(run("bunx", ["--no-install", "design-rover", "init", "--approve", "--generate", "--cwd", fixture, "--json"], { cwd: temporary }))
+  assert.equal(initialized.pending, 0)
   const status = json(["status"])
   assert.equal(status.syncStatus, "synchronized")
   assert.deepEqual(status.staleGenerated, [])
@@ -76,7 +83,7 @@ try {
     assert.equal(JSON.parse(scopedText).limits.outputChars, scopedText.length)
     assert.equal(JSON.parse(scopedText).scope.path, "app/dashboard/page.tsx")
   } finally { await client.close() }
-  console.log(`Packaged CLI ${version}: init/generate/check, bounded context, JSON gates, baseline preservation and stdio MCP passed.`)
+  console.log(`Packaged CLI ${version}: fresh-project bunx init, public manifest, generate/check, bounded context, JSON gates, baseline preservation and stdio MCP passed.`)
 } finally {
   await fs.rm(temporary, { recursive: true, force: true })
 }

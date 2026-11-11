@@ -1,13 +1,13 @@
-import path from "node:path"
 import { entityId, type ComponentRecord } from "@design-rover/model"
 import type { ExtractedComponent, RepoEvidence } from "../evidence.ts"
 import { shortHash } from "../hash.ts"
 import { resolveComponent } from "../component-resolution.ts"
 import { resolveComponentProps } from "../type-resolution.ts"
 import { classReferencesToken, themeTokenNames } from "../token-usage.ts"
+import { localModules } from "../local-modules.ts"
 
 function isUiPath(file: string): boolean {
-  return /(^|\/)(components\/ui|ui\/|components\/primitives)\//.test(file)
+  return /(^|\/)(components\/ui|ui|components\/primitives)\//.test(file)
 }
 
 function isFeatureLocal(file: string): boolean {
@@ -28,23 +28,14 @@ function importPathFor(
   name: string,
 ): string {
   const aliases = (evidence.componentsJson?.aliases ?? {}) as Record<string, string>
-  if (aliases.ui && isUiPath(file)) {
-    const base = path.posix.basename(file).replace(/\.(tsx|jsx|ts|js)$/, "")
-    return `${aliases.ui}/${base}`
+  const preferred = [isUiPath(file) ? aliases.ui : undefined, aliases.components].filter((value): value is string => typeof value === "string")
+  const rank = (candidate: string) => {
+    const preference = preferred.findIndex((alias) => candidate === alias || candidate.startsWith(`${alias}/`))
+    return preference >= 0 ? preference : candidate.startsWith(".") ? preferred.length + 1 : preferred.length
   }
-  if (aliases.components && file.includes("components/")) {
-    const rest = file.split("components/")[1]?.replace(/\.(tsx|jsx|ts|js)$/, "")
-    if (rest) return `${aliases.components}/${rest}`
-  }
-  const paths = evidence.tsconfigPaths
-  const at = paths["@/*"]?.[0]
-  if (at) {
-    const prefix = at.replace(/\*$/, "").replace(/^\.\//, "")
-    if (file.startsWith(prefix)) {
-      return `@/${file.slice(prefix.length).replace(/\.(tsx|jsx|ts|js)$/, "")}`
-    }
-  }
-  return `./${file.replace(/\.(tsx|jsx|ts|js)$/, "")}`
+  const candidates = localModules(evidence).importPaths(file)
+  candidates.sort((left, right) => rank(left) - rank(right) || left.length - right.length || left.localeCompare(right))
+  return candidates[0] ?? `./${file.replace(/\.(?:tsx?|jsx?|mts|cts|mjs|cjs)$/, "")}`
 }
 
 function componentUsages(evidence: RepoEvidence, candidates: { name: string; source: string; exportName: string }[]) {

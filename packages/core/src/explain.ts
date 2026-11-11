@@ -12,7 +12,7 @@ export function explain(model: CanonicalModel, query: string): string {
   }
 
   const componentMatches = model.components.filter(
-    (item) => item.name.toLowerCase() === q || item.id.toLowerCase() === q,
+    (item) => item.name.toLowerCase() === q || item.exportName.toLowerCase() === q || item.id.toLowerCase() === q,
   )
   if (componentMatches.length > 1) return `Multiple components match. Use an exact ID:\n${componentMatches.map((item) => `${item.id} — ${item.source}`).join("\n")}`
   const component = componentMatches[0]
@@ -21,6 +21,7 @@ export function explain(model: CanonicalModel, query: string): string {
       component.name,
       `Source: ${component.source}`,
       `Import: ${component.importPath}`,
+      `Export: ${component.exportName}`,
       `Variants: ${component.variants.join(", ") || "none"}`,
       `Sizes: ${component.sizes.join(", ") || "none"}`,
       `Props: ${component.props.map((prop) => `${prop.name}${prop.required ? "" : "?"}: ${prop.type ?? "unresolved"}${prop.defaultValue ? ` = ${prop.defaultValue}` : ""}`).join(", ") || "none"}`,
@@ -93,7 +94,7 @@ export function searchModel(model: CanonicalModel, query: string) {
   const q = query.trim().toLowerCase()
   return {
     components: model.components.filter((item) =>
-      `${item.id} ${item.name} ${item.importPath} ${item.source}`.toLowerCase().includes(q),
+      `${item.id} ${item.name} ${item.exportName} ${item.importPath} ${item.source}`.toLowerCase().includes(q),
     ),
     patterns: model.patterns.filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(q)),
     tokens: model.tokens.filter((item) => `${item.id} ${item.name} ${item.scope ?? ""} ${item.mode ?? ""}`.toLowerCase().includes(q)),

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "bun run --filter design-rover build",
-    "pack:cli": "bun run build && bun pm pack --cwd packages/cli --destination ../..",
+    "pack:cli": "bun run build && node scripts/pack-cli.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "bun run --workspaces --if-present typecheck",
@@ -16,12 +16,19 @@
     "dev:web": "bun run --filter @design-rover/web dev",
     "smoke:cli": "node scripts/smoke-cli.mjs",
     "verify:published": "node scripts/verify-published.mjs",
-    "design-rover": "tsx packages/cli/src/bin.ts"
+    "design-rover": "tsx packages/cli/src/bin.ts",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "release": "semantic-release"
   },
   "devDependencies": {
     "@design-rover/core": "workspace:*",
     "@design-rover/model": "workspace:*",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/git": "11.0.1",
+    "@semantic-release/release-notes-generator": "14.1.1",
     "@types/node": "^24.5.2",
+    "conventional-changelog-conventionalcommits": "8.0.0",
+    "semantic-release": "25.0.9",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

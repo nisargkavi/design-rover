@@ -253,6 +253,7 @@ export function printInitSummary(input: {
   header()
   line(input.created ? "  Initialized repository design knowledge." : "  Already initialized. Existing canonical knowledge was preserved.")
   line(`  ${input.framework} · ${input.styling.join(" · ") || "unknown styling"}`)
+  if (input.framework === "unknown") line("  Root framework is unknown. Non-React templates are not component-checked; monorepos may need per-app configuration.")
   line()
   line(`  ${pad(input.counts.components)}  components`)
   line(`  ${pad(input.counts.tokens)}  tokens`)

@@ -1,59 +1,64 @@
-name: GitHub Release
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      resume_version:
+        description: "Retry a tagged release, e.g. 0.3.2; select its v0.3.2 tag above. Leave empty for a normal main release."
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
 
 jobs:
-  release:
+  validate:
+    uses: ./.github/workflows/test.yml
+  publish:
+    needs: validate
+    if: github.repository == 'nisargkavi/design-rover'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: write
+      packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - name: Verify release identity
-        run: node scripts/check-release.mjs "${GITHUB_REF_NAME#v}"
+      - name: Install the OIDC-capable npm CLI
+        run: npm install --global npm@11.20.0 --ignore-scripts
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run test
-      - run: node --test scripts/prepare-release-assets.test.mjs
-      - run: bun run pack:cli
-      # npm publishing is a separate maintainer action. A tag never republishes a version.
-      - name: Prepare the published npm artifact and checksum
-        run: node scripts/prepare-release-assets.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/design-rover-release"
-      - name: Smoke test the exact release artifact
-        run: node scripts/smoke-cli.mjs "$RUNNER_TEMP/design-rover-release/design-rover-${GITHUB_REF_NAME#v}.tgz"
-      - name: Create GitHub release
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          flags=()
-          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
-          if [[ -f "docs/releases/$GITHUB_REF_NAME.md" ]]; then
-            flags+=(--notes-file "docs/releases/$GITHUB_REF_NAME.md")
-          else
-            flags+=(--generate-notes)
-          fi
-          gh release create "$GITHUB_REF_NAME" \
-            "$RUNNER_TEMP/design-rover-release/design-rover-$version.tgz" \
-            "$RUNNER_TEMP/design-rover-release/SHA256SUMS" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "Design Rover $version" \
-            "${flags[@]}"
+      - name: Publish the next semantic version, or resume a verified tag
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+          RESUME_VERSION: ${{ inputs.resume_version }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [[ -n "$RESUME_VERSION" ]]; then
+            [[ "$RESUME_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+            [[ "$GITHUB_REF_NAME" == "v$RESUME_VERSION" ]] || { echo "Select the matching release tag when resuming."; exit 1; }
+            node scripts/release-plugin.mjs resume "$RESUME_VERSION"
+          else
+            [[ "$GITHUB_REF_NAME" == "main" ]] || { echo "Normal releases run from main."; exit 1; }
+            bun run release
+          fi

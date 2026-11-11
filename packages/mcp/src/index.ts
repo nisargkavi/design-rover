@@ -42,7 +42,7 @@ export async function createMcpServer(root: string) {
     async ({ name, source }) => {
       const model = await requireModel()
       const components = model.components.filter(
-        (item) => trusted(item) && (item.name.toLowerCase() === name.toLowerCase() || item.id.toLowerCase() === name.toLowerCase()) && (!source || item.source === source),
+        (item) => trusted(item) && (item.name.toLowerCase() === name.toLowerCase() || item.exportName.toLowerCase() === name.toLowerCase() || item.id.toLowerCase() === name.toLowerCase()) && (!source || item.source === source),
       )
       return {
         content: [{ type: "text", text: JSON.stringify(components.length === 1 ? components[0] : components.length ? { error: "ambiguous component", choices: components.map(({ id, source, importPath }) => ({ id, source, importPath })) } : { error: "not found" }, null, 2) }],

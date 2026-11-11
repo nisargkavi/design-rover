@@ -1,4 +1,6 @@
 import path from "node:path"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import {
   MANAGED_END,
   MANAGED_START,
@@ -9,6 +11,9 @@ import {
 import { sha256 } from "./hash.ts"
 import { readText, writeText } from "./fs.ts"
 import { relativePosix, specPaths } from "./paths.ts"
+import { assertSafeWritePaths } from "./write-paths.ts"
+
+const exec = promisify(execFile)
 
 export type GeneratedBundle = {
   agents: string
@@ -109,6 +114,7 @@ export async function writeGenerated(
   options: { writeRepoFiles?: boolean; dryRun?: boolean } = {},
 ): Promise<GeneratedBundle> {
   const { directory, rendered, entries } = await projections(root, model)
+  await assertSafeWritePaths(root, [...entries.map((entry) => path.join(root, entry.rel)), path.join(specPaths(root).generated, "projections.json")])
   const tracked = new Map(model.system.generated.map((file) => [file.path, file.hash]))
   const writes: { rel: string; content: string }[] = []
   for (const entry of entries) {
@@ -127,15 +133,16 @@ export async function writeGenerated(
   const files: GeneratedFile[] = []
   // Validate every output before the first write.
   for (const write of writes) {
-    if (!options.dryRun) await writeText(path.join(root, write.rel), write.content)
+    if (!options.dryRun) await writeText(path.join(root, write.rel), write.content, root)
     files.push({ path: write.rel, hash: sha256(write.content), managed: true })
   }
-  if (!options.dryRun) await writeText(path.join(specPaths(root).generated, "projections.json"), `${JSON.stringify({ files }, null, 2)}\n`)
+  if (!options.dryRun) await writeText(path.join(specPaths(root).generated, "projections.json"), `${JSON.stringify({ files }, null, 2)}\n`, root)
   return { ...rendered, files }
 }
 
 export async function generatedHashes(root: string, model: CanonicalModel): Promise<{ stale: string[] }> {
   const { entries } = await projections(root, model)
+  await assertSafeWritePaths(root, entries.map((entry) => path.join(root, entry.rel)))
   const tracked = new Set(model.system.generated.map((file) => file.path))
   if (!tracked.size) return { stale: [] }
   const stale: string[] = []
@@ -151,4 +158,29 @@ export async function generatedHashes(root: string, model: CanonicalModel): Prom
     } else if (current !== entry.content) stale.push(entry.rel)
   }
   return { stale }
+}
+
+/** Keep freshness reporting complete; gates separately ignore absent local projections. */
+export async function gateGeneratedStale(root: string, model: CanonicalModel): Promise<string[]> {
+  const { stale } = await generatedHashes(root, model)
+  let tracked = new Set<string>()
+  try {
+    const { stdout } = await exec("git", ["ls-files", "--cached", "-z", "--full-name"], { cwd: root, maxBuffer: 20 * 1024 * 1024 })
+    const { stdout: prefix } = await exec("git", ["rev-parse", "--show-prefix"], { cwd: root })
+    const directory = prefix.replace(/\r?\n$/, "")
+    tracked = new Set(stdout.split("\0").filter((file) => file && file.startsWith(directory)).map((file) => file.slice(directory.length)))
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: string }
+    // Git is optional for a local model. An unreadable index in a Git project,
+    // however, must not silently disable checks for tracked guidance.
+    if (failure.code !== "ENOENT" && !failure.stderr?.includes("not a git repository")) {
+      throw new Error(`Cannot determine Git-tracked guidance: ${failure.message}`)
+    }
+  }
+  const required: string[] = []
+  for (const relative of stale) {
+    const current = await readText(path.join(root, relative))
+    if (current !== undefined || tracked.has(relative)) required.push(relative)
+  }
+  return required
 }

@@ -1,6 +1,7 @@
 import path from "node:path"
 import ignore from "ignore"
-import type { CanonicalModel } from "@design-rover/model"
+import type { CanonicalModel, TokenRecord } from "@design-rover/model"
+import { variableReferences } from "./token-usage.ts"
 
 const KINDS = ["component", "token", "pattern", "convention", "intent", "exception"] as const
 export type ContextKind = typeof KINDS[number]
@@ -124,6 +125,7 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
   const relevantOwners = new Set<string | undefined>()
   const relevantComponentSources = new Set<string>()
   const tokenNames = new Set<string>()
+  const dependencyWarnings = new Set<string>()
 
   function relevance(kind: ContextKind, record: ContextRecord): ContextMatch | undefined {
     if (!visible(kind, record, includePending)) return undefined
@@ -180,8 +182,10 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
     const requestedComponent = kind === "component" && nameWords.length > 0 && nameWords.every((word) => words.includes(word))
     const requestBoost = explicitMatch ? 3000 : requestedComponent ? 2000 : 0
     if (requestBoost) reasons.push("requested-record")
+    const componentBoost = kind === "component" && !requestBoost && nameWords.some((word) => words.includes(word)) ? 400 : 0
+    if (componentBoost) reasons.push("matching-component")
     const decisionBoost = record.status === "approved" && kind !== "component" && kind !== "token" ? 1000 : 0
-    return { kind, score: requestBoost + decisionBoost + pathScore + lexical, reasons, sourceRefs: files, record }
+    return { kind, score: requestBoost + componentBoost + decisionBoost + pathScore + lexical, reasons, sourceRefs: files, record }
   }
 
   for (const component of model.components) {
@@ -203,6 +207,52 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
       if (match) matches.push(match)
     }
   }
+  // Preserve aliases as declarations, and include their visible scoped inputs.
+  // This is a dependency graph, not CSS cascade evaluation or a flattened value.
+  const tokensByName = new Map<string, TokenRecord[]>()
+  for (const token of model.tokens) {
+    const values = tokensByName.get(token.name) ?? []
+    values.push(token)
+    tokensByName.set(token.name, values)
+  }
+  const tokenMatches = new Map(matches.filter((match) => match.kind === "token").map((match) => [match.record.id, match]))
+  const queue = [...tokenMatches.values()].sort((left, right) => compare(left.record.id, right.record.id)).map((match) => match.record as TokenRecord)
+  const processed = new Set<string>()
+  const edges = new Map<string, string[]>()
+  for (let index = 0; index < queue.length; index += 1) {
+    if (index >= 512) { dependencyWarnings.add("Token dependency traversal exceeded 512 records; retrieve a narrower token scope before treating dependencies as complete."); break }
+    const token = queue[index]!
+    if (processed.has(token.id)) continue
+    processed.add(token.id)
+    const dependencies: string[] = []
+    for (const reference of variableReferences(token.value)) {
+      const candidates = (tokensByName.get(reference) ?? []).filter((candidate) => visible("token", candidate, includePending)
+        && (owner(candidate.origin) === undefined || owner(candidate.origin) === owner(token.origin)))
+      if (!candidates.length) dependencyWarnings.add(`No visible owner-compatible declaration for ${reference}, referenced by ${token.name}; a fallback or external declaration may apply.`)
+      for (const candidate of candidates.sort((left, right) => compare(left.id, right.id))) {
+        dependencies.push(candidate.id)
+        if (tokenMatches.has(candidate.id)) continue
+        tokenNames.add(reference)
+        const match = relevance("token", candidate)
+        if (!match) continue
+        match.reasons.push("token-dependency")
+        matches.push(match)
+        tokenMatches.set(candidate.id, match)
+        queue.push(candidate)
+      }
+    }
+    edges.set(token.id, dependencies)
+  }
+  const completed = new Set<string>()
+  const cyclic = (id: string, visiting: Set<string>): boolean => {
+    if (visiting.has(id)) return true
+    if (completed.has(id) || !edges.has(id)) return false
+    const next = new Set(visiting).add(id)
+    const found = edges.get(id)!.some((dependency) => cyclic(dependency, next))
+    completed.add(id)
+    return found
+  }
+  if ([...edges.keys()].some((id) => cyclic(id, new Set()))) dependencyWarnings.add("Token reference cycle detected; inspect the scoped dependency declarations before assuming a resolved value.")
   matches.sort((left, right) => right.score - left.score || compare(left.kind, right.kind) || compare(left.record.id, right.record.id))
   const decisionCount = matches.filter(approvedDecision).length
   function packet(items: ContextMatch[], omittedByBudget: number, omittedByLimit: number): ContextPacket {
@@ -215,7 +265,7 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
       limits: { limit, maxChars, outputChars: 0, unit: "UTF-16 code units including JSON formatting and final newline" },
       freshness: { checked: false, canonicalUpdatedAt: model.system.updatedAt, lastAnalyzedAt: model.system.lastAnalyzedAt ?? null, recordedSyncStatus: model.system.syncStatus },
       coverage: { matched: matches.length, returned: items.length, complete: items.length === matches.length, omittedByLimit, omittedByBudget, approvedDecisions: { matched: decisionCount, returned: returnedDecisions, omitted: omittedDecisions } },
-      warnings: ["Canonical snapshot only; run status to check source freshness."],
+      warnings: ["Canonical snapshot only; run status to check source freshness.", ...[...dependencyWarnings].sort(compare)],
       matches: items,
     }
     if (omittedDecisions) result.warnings.push("Applicable approved decisions were omitted. Retrieve them before treating this context as complete.")

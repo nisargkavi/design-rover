@@ -27,6 +27,7 @@ export type JsxHit = {
   attributes: Record<string, string>
   startLine: number
   selfClosing: boolean
+  styleProperties?: string[]
 }
 
 export type CommentHit = {

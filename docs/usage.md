@@ -116,11 +116,11 @@ Choose separately whether to commit generated AGENTS.md, CLAUDE.md, Cursor rules
 If the model and generated instructions are private local assistance, use exact tool paths in the project's root `.gitignore`:
 
 ```gitignore
-.design-rover/
-AGENTS.md
-CLAUDE.md
-.cursor/rules/design-rover.mdc
-.agents/skills/design-rover/
+/.design-rover/
+/AGENTS.md
+/CLAUDE.md
+/.cursor/rules/design-rover.mdc
+/.agents/skills/design-rover/
 ```
 
 Only ignore AGENTS.md and CLAUDE.md this way when they are new tool-generated files. Preserve existing tracked or human-authored instructions; `.gitignore` does not untrack files already committed. Avoid broad patterns such as `.cursor/`, which can hide unrelated project configuration.

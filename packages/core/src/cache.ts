@@ -8,7 +8,7 @@ import type { FileEvidence } from "./evidence.ts"
 import { sha256 } from "./hash.ts"
 
 export type FileCache = {
-  version: 4
+  version: 5
   hash: string
   files: FileEvidence[]
 }
@@ -33,7 +33,7 @@ const evidenceSchema = z.object({
   exportedClassConstants: strings,
 }).passthrough()
 
-const cacheSchema = z.object({ version: z.literal(4), hash: z.string(), files: z.array(evidenceSchema) })
+const cacheSchema = z.object({ version: z.literal(5), hash: z.string(), files: z.array(evidenceSchema) })
 
 export async function loadCache(root: string): Promise<FileCache | undefined> {
   const file = path.join(specPaths(root).cache, "evidence.json")

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import {
   CanonicalModelSchema,
   ComponentRecordSchema,
@@ -103,6 +104,24 @@ export async function isInitialized(root: string): Promise<boolean> {
   return pathExists(specPaths(root).system)
 }
 
+async function acquireCanonicalLock(lockFile: string): Promise<Awaited<ReturnType<typeof fs.open>>> {
+  const timeoutMs = 1500
+  const deadline = performance.now() + timeoutMs
+  for (;;) {
+    try { return await fs.open(lockFile, "wx") }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) {
+        throw new Error(`Canonical model is busy with another read or write (${lockFile}) after waiting ${timeoutMs}ms. Retry after it finishes. If a process stopped unexpectedly, verify no reader or writer is active before manually removing its stale lock.`)
+      }
+      // Keep readers exclusive too: a save replaces several canonical files.
+      // A lock's age cannot prove its owner is dead, so never remove it here.
+      await delay(Math.min(25, remaining))
+    }
+  }
+}
+
 async function loadCanonicalUnlocked(root: string): Promise<CanonicalModel | undefined> {
   const paths = specPaths(root)
   const recoveryMarker = path.join(paths.dir, ".recovery-required.json")
@@ -135,14 +154,7 @@ export async function loadCanonical(root: string): Promise<CanonicalModel | unde
   // Reading an uninitialized repository must not create a canonical directory.
   if (!(await pathExists(paths.dir))) return undefined
   const lockFile = path.join(paths.dir, ".write.lock")
-  let lock: Awaited<ReturnType<typeof fs.open>>
-  try { lock = await fs.open(lockFile, "wx") }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`Canonical model is busy with another read or write (${lockFile}). Retry after it finishes.`)
-    }
-    throw error
-  }
+  const lock = await acquireCanonicalLock(lockFile)
   try { return await loadCanonicalUnlocked(root) }
   finally {
     await lock.close()
@@ -155,14 +167,7 @@ export async function saveCanonical(root: string, model: CanonicalModel): Promis
   const paths = specPaths(root)
   await fs.mkdir(paths.dir, { recursive: true })
   const lockFile = path.join(paths.dir, ".write.lock")
-  let lock: Awaited<ReturnType<typeof fs.open>>
-  try { lock = await fs.open(lockFile, "wx") }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`Canonical model is busy with another read or write (${lockFile}). Retry after it finishes.`)
-    }
-    throw error
-  }
+  const lock = await acquireCanonicalLock(lockFile)
   let staging: string | undefined
   let retainRecovery = false
   try {

@@ -1,24 +1,76 @@
 # Design Rover
 
-Repository design knowledge for people and AI agents.
+[![CI](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml/badge.svg)](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml)
+[![npm version](https://img.shields.io/npm/v/design-rover)](https://www.npmjs.com/package/design-rover)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[GitHub repository](https://github.com/nisargkavi/design-rover)
+**Give coding agents design knowledge from your existing codebase.**
 
-Design Rover scans an existing React/TypeScript codebase, records its components, scoped tokens and UI conventions, and proposes reviewable updates. The canonical model stays in your repository. Agent guidance, MCP and checks use the same model.
+Design Rover is a local CLI for React/TypeScript projects. It records component APIs, scoped CSS tokens and UI conventions in a repository model, lets you review inferred rules, and makes that knowledge available through CLI queries, generated instructions and MCP.
 
-## Get started
+Use it to find a component before rebuilding it, check the API before calling it, and review design-system changes alongside your code. It analyzes source; it does not redesign screens or rewrite application files.
 
-Run this from the project you want to analyze:
+## Start in five minutes
+
+Requires Bun and Node >=20.19.0. Run these commands from the project you want to analyze; no global installation is needed.
 
 ```sh
 bunx design-rover init
+bunx design-rover diff
 ```
 
-To pin the release, use `bunx design-rover@0.3.0 init`.
+Review the proposals, then replace `<id>` with a record or change ID from the output:
 
-## Development
+```sh
+bunx design-rover approve <id>
+bunx design-rover generate
+bunx design-rover check
+```
 
-Use Bun 1.4.4 for dependencies and development scripts. The packaged CLI supports Node >=20.19.0.
+`init` writes `.design-rover/` and leaves inferred knowledge pending. Use `approve` without an ID only when you want to approve all reviewed proposals. After editing UI code, run `diff` and `sync` to review new observations. `sync --yes` skips the prompt; approving pending rules is a separate explicit choice.
+
+For example, if your Button already offers a large size, a custom padding override can produce a finding that points to that API. For a resolved prop, a change from optional to required appears in the model diff. Findings include source evidence so you can decide whether they apply.
+
+## Use with an AI agent
+
+Check freshness, then retrieve context for the task and path you are editing:
+
+```sh
+bunx design-rover status --json
+bunx design-rover context "add a billing form" --path app/billing/page.tsx --max-chars 12000 --json
+```
+
+Use a path that exists in your project. `context` reads the saved model without scanning source. Refresh observations with `sync` when needed; do not treat a saved context packet as proof that the code is current.
+
+Approved rules and observed APIs are included by default. Pending inferences require `--include-pending`. The result reports omitted records and decisions when a limit is reached: narrow the request or increase the budget rather than silently ignoring a constraint.
+
+`generate` writes AGENTS.md, CLAUDE.md, a Cursor rule and an Agent Skill. These are projections; `.design-rover/` remains the canonical model. Agents can also retrieve the same task context through MCP `get_context`.
+
+See [agent and MCP usage](docs/usage.md#ai-agents-and-mcp) for the full workflow.
+
+## What it understands
+
+| Area | Current support |
+| --- | --- |
+| Components | JSX, CVA variants, local/imported prop types and local barrel exports |
+| Tokens | CSS custom properties with selector/media scope and importance; basic Tailwind configuration |
+| Decisions | Reviewable conventions, patterns, design intent and scoped exceptions |
+| Changes | API/token drift, stale generated guidance, basic usage findings and baselines |
+| Retrieval | Task/path filtering, whole records, source references and explicit omissions |
+
+Type resolution is limited to scanned local modules and supported static forms. External package declarations, complex TypeScript and dynamic styling can remain unresolved; records expose resolution issues. CSS class contracts such as `.btn`/`.field` variants are not represented as React component APIs. A clean check does not prove complete design-system conformance, visual quality, accessibility or Figma parity.
+
+The local Studio is a read-only viewer. Figma/Storybook support is experimental JSON evidence import, and the hosted snapshot service is an in-memory prototype. See [supported behavior and limits](docs/usage.md#supported-behavior-and-limits).
+
+## Keep knowledge reviewable
+
+For a shared team workflow, commit reviewed canonical records under `.design-rover/` so decisions can be reviewed with code, while keeping caches and generated snapshots local. A local-only setup can ignore all tool artifacts instead. Choose deliberately rather than adding every generated file to Git.
+
+See [Git tracking recommendations](docs/usage.md#git-tracking) before adding the model to version control. Never commit credentials or unreviewed private metadata.
+
+## Develop and contribute
+
+Use Bun 1.4.4 in this repository:
 
 ```sh
 bun install --frozen-lockfile
@@ -28,114 +80,6 @@ bun run pack:cli
 bun run smoke:cli
 ```
 
-After publishing, run `bun run verify:published` to check the public npm release with a fresh project and an empty Bun cache.
+See [development and releases](docs/development.md) for source commands, package validation and publishing. Issues and pull requests are welcome at [GitHub](https://github.com/nisargkavi/design-rover).
 
-Run directly from source:
-
-```sh
-bun run design-rover init --cwd /path/to/app
-bun run design-rover diff --cwd /path/to/app --json
-bun run design-rover approve --cwd /path/to/app
-bun run design-rover check --cwd /path/to/app --json
-```
-
-Or install the local CLI tarball:
-
-```sh
-bun add --global ./design-rover-0.3.0.tgz
-design-rover init
-```
-
-## Workflow
-
-```sh
-design-rover init                 # discover code; leave inferences pending review
-design-rover diff                 # inspect proposed changes and pending records
-design-rover approve <id>         # approve one record or proposed change
-design-rover reject <id>          # reject an inference until material evidence changes
-design-rover generate             # refresh agent guidance
-design-rover query Button --json  # retrieve records; choose by ID when names repeat
-design-rover context "billing form" --path app/billing/page.tsx --max-chars 12000 --json
-design-rover explain <id>         # inspect API, scope and source
-design-rover check                # check against known decisions
-design-rover sync                 # review and accept observed updates
-```
-
-`init --approve --generate` approves initial inferences and generates guidance in one explicit operation. Repeating `init` preserves existing decisions; use `sync` to review changes. `sync --yes` accepts proposed changes without a prompt. `--json` keeps machine output on stdout. `ci --fail-on error|warning|none` reports the same decision through its exit code and JSON `ok` field.
-
-Incremental analysis reconciles the full file manifest and reuses unchanged parsing. Additions, deletions, renames, ignore changes and branch switches are reflected. Invalid Git bases and corrupt canonical records report errors instead of appearing clean.
-
-## Canonical storage
-
-Canonical design knowledge lives in `.design-rover/`. Generated AGENTS.md, CLAUDE.md, Cursor rules and Agent Skills are projections of that model. Notes outside managed blocks are preserved. Customized generated adapters must be preserved or moved before regeneration; they are not silently overwritten.
-
-Install integrations with `design-rover git install` and `design-rover ci install`. Custom hooks are preserved and custom workflows require review.
-
-Canonical writes use a lock and staged updates with rollback. After an interrupted writer, inspect `.write.lock` and any recovery marker before removing a stale lock. A `.recovery-required.json` marker blocks further loads until recovery is complete.
-
-## Supported and experimental behavior
-
-| Area | Current behavior |
-| --- | --- |
-| Components | React JSX, local and imported TypeScript prop APIs, CVA variants, local barrel-aware identity and usage |
-| Tokens | CSS custom properties with selector/media scope and importance; basic Tailwind configuration extraction |
-| Knowledge | Evidence-backed observations, reviewable inferences, explicit approvals and rejections |
-| Checks | Component contract drift, basic sizing/restyling findings, intent and convention diagnostics, baselines |
-| Agent guidance | Concise AGENTS.md, CLAUDE.md, Cursor rule and Agent Skill projections |
-| Agent retrieval | Task/query and path filters, deterministic relevance, whole records within a character budget, explicit omissions |
-| MCP | Ten tools; approved/observed records by default, explicit pending opt-in, ambiguity and initialization errors |
-| Studio | Local read-only viewer with origin checks and safe text rendering |
-| Figma/Storybook | Experimental local JSON evidence import; no direct service connector |
-| Hosted app | Experimental authenticated, repository-scoped, in-memory snapshot service |
-
-Type resolution follows scanned local modules; external package declarations and complex TypeScript expressions are not fully resolved. Component records expose their prop-resolution status and issues. Ambiguous or cyclic module lookups stay unresolved. Complex dynamic styling is not fully analyzed. Token declarations in different source files remain distinct because bundle/cascade order is unknown. Design Rover does not prove visual quality, accessibility or pixel parity.
-
-## Retrieve context for a task
-
-```sh
-bunx design-rover context "add a billing form" --path app/billing/page.tsx --limit 20 --max-chars 12000 --json
-```
-
-The `context` command and MCP `get_context` tool read the existing canonical model without scanning source files. Run `status --json` to check freshness and `sync` to review changes first. Retrieval prioritizes relevant components and applicable approved decisions, excludes unrelated package records when a path is provided, and excludes pending knowledge unless `--include-pending` is requested.
-
-The output reports omitted records and decisions when the result count or character budget is too small. Records are included whole. An incomplete result is not permission to ignore an omitted decision; narrow the task or increase the budget. Existing `query` and MCP `search_system` entrypoints remain available.
-
-Approved exceptions match a path using gitignore-style patterns and, when provided, a component name or ID. `allows` can name `restyle-spacing`, exact classes, or the broader `local-override`. A color exception does not suppress unrelated spacing findings. Inferred exceptions require approval.
-
-`@shadcn/lint` is optional. Only compatible approved policies map to its rules. The tool does not treat a preference against abstractions as a ban on arbitrary values, and is not affiliated with shadcn.
-
-## Local and hosted viewers
-
-```sh
-design-rover studio --cwd /path/to/app
-design-rover mcp --cwd /path/to/app
-```
-
-The Next.js viewer reads `DESIGN_ROVER_ROOT` locally. Hosted viewing requires `DESIGN_ROVER_API`, `DESIGN_ROVER_ORG`, `DESIGN_ROVER_REPO` and `DESIGN_ROVER_TOKEN`. The server also requires a nonempty token. There is no unscoped endpoint returning an arbitrary repository. Hosted storage is not durable and is not production team collaboration.
-
-## Layout and releases
-
-```text
-packages/model        schemas and shared identity
-packages/core         analysis, canonical storage, sync and checks
-packages/cli          design-rover package and local viewer
-packages/mcp          stdio tools
-packages/integrations optional lint and external evidence adapters
-apps/web              read-only Next.js viewer
-apps/server           experimental hosted snapshots
-```
-
-The CI workflow checks types, regressions, the CLI bundle and packaged behavior with Bun. Release tags must match the public package version.
-
-Publish the verified tarball to npm first, wait for registry availability, then verify the fresh-project entrypoint:
-
-```sh
-npm publish ./design-rover-0.3.0.tgz --access public --tag latest
-bun run verify:published
-```
-
-Push a matching `v0.3.0` tag on the verified release commit to create the GitHub Release. The release workflow rebuilds and tests the tagged source, verifies every package file against the public npm tarball, and attaches that tarball and `SHA256SUMS`. It uses the repository's GitHub token; npm publication is a separate authenticated maintainer step.
-
-The next priorities are standards-based exports, broader type resolution and real evidence adapters.
-
-MIT. See [LICENSE](LICENSE).
+[npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.3.1 release notes](docs/releases/v0.3.1.md) · [MIT license](LICENSE)

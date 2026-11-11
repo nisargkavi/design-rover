@@ -76,6 +76,28 @@ function isComponentName(name: string): boolean {
   return PASCAL.test(name) && name !== "React"
 }
 
+const UNKNOWN_CLASS_FRAGMENT = "\0"
+
+function templateClassValues(expr: ts.Expression, depth = 0): string[] {
+  if (depth > 8) return [UNKNOWN_CLASS_FRAGMENT]
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return [expr.text]
+  if (ts.isParenthesizedExpression(expr)) return templateClassValues(expr.expression, depth + 1)
+  if (ts.isConditionalExpression(expr)) {
+    const values = [...new Set([...templateClassValues(expr.whenTrue, depth + 1), ...templateClassValues(expr.whenFalse, depth + 1)])]
+    return values.length <= 64 ? values : [UNKNOWN_CLASS_FRAGMENT]
+  }
+  if (ts.isTemplateExpression(expr)) {
+    let values = [expr.head.text]
+    for (const span of expr.templateSpans) {
+      let alternatives = templateClassValues(span.expression, depth + 1)
+      if (values.length * alternatives.length > 64) alternatives = [UNKNOWN_CLASS_FRAGMENT]
+      values = values.flatMap((prefix) => alternatives.map((value) => prefix + value + span.literal.text))
+    }
+    return values
+  }
+  return [UNKNOWN_CLASS_FRAGMENT]
+}
+
 function collectClassesFromExpr(
   expr: ts.Expression | undefined,
 ): { classes: string[]; dynamic: boolean } {
@@ -84,8 +106,7 @@ function collectClassesFromExpr(
     return { classes: splitClasses(expr.text), dynamic: false }
   }
   if (ts.isTemplateExpression(expr)) {
-    const parts = [expr.head.text, ...expr.templateSpans.map((span) => span.literal.text)]
-    return { classes: splitClasses(parts.join(" ")), dynamic: true }
+    return { classes: [...new Set(templateClassValues(expr).flatMap(splitClasses).filter((value) => !value.includes(UNKNOWN_CLASS_FRAGMENT)))], dynamic: true }
   }
   if (ts.isCallExpression(expr)) {
     const name = callName(expr)
@@ -483,6 +504,20 @@ export function extractFileEvidence(input: {
     const props = fn ? propsFromFunction(source, fn) : ts.isFunctionLike(expr) ? propsFromFunction(source, expr) : []
     const composition = new Set<string>()
     const classNames: string[] = []
+    const collectComponentClasses = (child: ts.Node) => {
+      // A nested component has its own record; its implementation is not the parent's styling.
+      if (child !== bodyNode && ((ts.isFunctionDeclaration(child) && child.name && isComponentName(child.name.text))
+        || (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name) && isComponentName(child.name.text) && child.initializer && containsJsx(child.initializer)))) return
+      if (ts.isJsxOpeningElement(child) || ts.isJsxSelfClosingElement(child)) {
+        const attribute = child.attributes.properties.find((item) => ts.isJsxAttribute(item) && item.name.getText() === "className")
+        if (attribute && ts.isJsxAttribute(attribute)) {
+          if (attribute.initializer && ts.isStringLiteral(attribute.initializer)) classNames.push(...splitClasses(attribute.initializer.text))
+          else if (attribute.initializer && ts.isJsxExpression(attribute.initializer)) classNames.push(...collectClassesFromExpr(attribute.initializer.expression).classes)
+        }
+      }
+      ts.forEachChild(child, collectComponentClasses)
+    }
+    collectComponentClasses(bodyNode)
     const visitComp = (child: ts.Node) => {
       if (ts.isJsxOpeningElement(child) || ts.isJsxSelfClosingElement(child)) {
         const tag = tagName(child.tagName)

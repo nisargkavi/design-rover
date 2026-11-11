@@ -26,7 +26,7 @@ export function recordIdentity(kind: EntityKind, record: unknown): string {
   return item.id
 }
 
-function componentSig(record: ComponentRecord) {
+export function componentApiSignature(record: ComponentRecord) {
   return {
     variants: [...record.variants].sort(),
     sizes: [...record.sizes].sort(),
@@ -44,8 +44,20 @@ function componentSig(record: ComponentRecord) {
   }
 }
 
+function componentSig(record: ComponentRecord) {
+  return {
+    ...componentApiSignature(record),
+    relatedTokens: [...record.relatedTokens].sort(),
+    usage: [...record.usage].sort((a, b) => a.file.localeCompare(b.file)),
+    architecture: record.architecture,
+    local: record.local,
+    composition: [...record.composition].sort(),
+    dependencies: [...record.dependencies].sort(),
+  }
+}
+
 function tokenSig(record: TokenRecord) {
-  return { value: record.value, category: record.category, origin: record.origin, scope: record.scope ?? ":root", mode: record.mode, important: record.important ?? false }
+  return { value: record.value, category: record.category, origin: record.origin, scope: record.scope ?? ":root", mode: record.mode, important: record.important ?? false, usageCount: record.usageCount }
 }
 
 function patternSig(record: PatternRecord) {
@@ -235,6 +247,9 @@ function componentDetails(before: ComponentRecord, after: ComponentRecord): stri
     if (!after.props.some((item) => item.name === prop.name)) details.push(`Removed prop: ${prop.name}`)
   }
   if (before.source !== after.source) details.push(`Source moved to ${after.source}`)
+  if (JSON.stringify([...before.relatedTokens].sort()) !== JSON.stringify([...after.relatedTokens].sort())) details.push("Related design tokens changed.")
+  if (JSON.stringify(before.usage) !== JSON.stringify(after.usage)) details.push("Component usage evidence changed.")
+  if (before.architecture !== after.architecture) details.push(`Observed architecture: ${after.architecture}.`)
   return details
 }
 

@@ -5,7 +5,7 @@ import type {
   ObservedSnapshot,
 } from "@design-rover/model"
 import { shortHash, sha256 } from "./hash.ts"
-import { diffModels } from "./diff.ts"
+import { componentApiSignature, diffModels } from "./diff.ts"
 import { extractFileEvidence } from "./parse.ts"
 import { usageDiagnostics } from "./usage-check.ts"
 
@@ -26,11 +26,12 @@ export function checkSystem(
   const contractChanges = diffModels(observed, { ...canonical, rejections: [] }).changes
   for (const change of contractChanges.filter((item) => item.entity === "component" && (item.kind === "update" || item.kind === "remove"))) {
     const component = change.before as CanonicalModel["components"][number]
+    const contextOnly = change.kind === "update" && JSON.stringify(componentApiSignature(component)) === JSON.stringify(componentApiSignature(change.after as typeof component))
     if (component.status === "approved" || component.status === "observed") {
       push(diagnostics, baseline, changed, {
         id: `api-${component.id}`,
         severity: "info",
-        title: `${component.name} ${change.kind === "remove" ? "is no longer observed" : "API changed"}`,
+        title: `${component.name} ${change.kind === "remove" ? "is no longer observed" : contextOnly ? "design context changed" : "API changed"}`,
         why: "The implementation no longer matches the canonical component model.",
         related: change.details.join("; ") || `Canonical component: ${component.source}.`,
         action: "Run `design-rover sync` to review the model update. No code was modified.",

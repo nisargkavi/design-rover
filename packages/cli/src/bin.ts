@@ -1,11 +1,12 @@
 import { parseArgs } from "node:util"
 import path from "node:path"
 import { createEngine, isInitialized, serializeContext } from "@design-rover/core"
-import { CLI_VERSION } from "@design-rover/model"
+import { CLI_VERSION, type CanonicalModel, type ModelChange, type ObservedSnapshot } from "@design-rover/model"
 import { mapShadcnLint, oxlintFromMap, reconcileSources } from "@design-rover/integrations"
 import * as clack from "@clack/prompts"
 import {
   emit,
+  cliCommand,
   fail,
   header,
   isJson,
@@ -15,8 +16,13 @@ import {
   printCheck,
   printDiff,
   printInitSummary,
+  printNextAction,
+  printReadiness,
+  printWorkflow,
+  onboardingCommands,
   printStatus,
   setJson,
+  type WorkflowState,
 } from "./print.ts"
 import { serveStudio } from "./serve.ts"
 
@@ -61,6 +67,92 @@ Options
   --fail-on <level>   CI: error (default) | warning | none
 `
 
+const COMMAND_HELP: Record<string, string> = {
+  init: `Design Rover init
+
+Usage
+  bunx design-rover init [--cwd <repository>] [--json]
+
+Analyze source and create canonical knowledge. Inferences remain pending until reviewed.
+Running init again preserves existing canonical decisions; use diff/sync to review changes.
+
+Options
+  --approve       Explicitly approve initial inferences after your own review
+  --generate      Write agent guidance during first initialization
+  --cwd <path>    Analyze another repository
+  --json          Return counts, readiness and next-step commands as JSON
+
+Next
+  bunx design-rover diff
+  Review evidence, then use the approve or reject command shown for a record.
+  bunx design-rover generate
+  bunx design-rover context "describe your UI change" --path path/to/ui.tsx
+  bunx design-rover check`,
+  sync: `Design Rover sync
+
+Usage
+  bunx design-rover sync [--yes] [--approve] [--json]
+
+Preview observed changes and pending inferences. No changes are applied without
+interactive confirmation or --yes. Pending inferences require explicit approval.
+
+Options
+  --yes           Accept observed inventory and updates to already trusted knowledge
+  --approve       Also approve pending inferences; combine with --yes after review
+  --base <ref>    Compare against a Git base
+  --json          Emit the preview, or the remaining diff after --yes
+
+Review one record
+  bunx design-rover diff
+  Copy its approve or reject command. Those commands apply only that decision.`,
+  context: `Design Rover context
+
+Usage
+  bunx design-rover context "describe your UI change" --path src/ui.tsx
+
+Retrieve a bounded JSON packet from canonical knowledge. This command does not
+scan source or prove freshness; run bunx design-rover status first when needed.
+
+Options
+  --path <path>       Repository-relative file or directory
+  --limit <n>         Whole-record limit (default 20, maximum 100)
+  --max-chars <n>     Formatted JSON budget (default 12000)
+  --include-pending  Include unapproved entries for review, not as approved policy
+  --cwd <path>       Repository root
+  --json             Same bounded JSON representation (no extra prose)
+
+If the packet is incomplete, narrow the task/path or increase its limits.`,
+}
+
+function countsOf(model: CanonicalModel | ObservedSnapshot) {
+  return {
+    components: model.components.length, tokens: model.tokens.length,
+    patterns: model.patterns.length, conventions: model.conventions.length,
+    intents: model.intents.length, exceptions: model.exceptions.length,
+  }
+}
+
+function workflowFor(model: CanonicalModel, staleGenerated: string[], cwd?: string): WorkflowState {
+  const apiResolution = { resolved: 0, partial: 0, unresolved: 0, untyped: 0, unknown: 0 }
+  for (const component of model.components) apiResolution[component.propsResolution?.status ?? "unknown"] += 1
+  return {
+    pending: [...model.components, ...model.tokens, ...model.patterns, ...model.conventions, ...model.intents, ...model.exceptions].filter((item) => item.status === "inferred" || item.status === "suggested").length,
+    generatedFiles: model.system.generated.length,
+    staleGenerated,
+    cwd,
+    contextPath: model.components.find((item) => !item.local)?.source ?? model.components[0]?.source,
+    incompleteApiId: model.components.find((item) => item.propsResolution?.status === "partial" || item.propsResolution?.status === "unresolved")?.id,
+    apiResolution,
+  }
+}
+
+function observedSyncChange(change: ModelChange): boolean {
+  if (change.entity === "projection") return false
+  const before = change.before as { status?: string } | undefined
+  if (before?.status === "inferred" || before?.status === "suggested") return false
+  return change.entity === "component" || change.entity === "token" || before?.status === "approved" || before?.status === "observed"
+}
+
 async function main() {
   const parsed = parseArgs({
     args: process.argv.slice(2),
@@ -83,12 +175,15 @@ async function main() {
     },
   })
 
+  setJson(Boolean(parsed.values.json))
   if (parsed.values.help || parsed.positionals[0] === "help") {
-    process.stdout.write(`${HELP.trim()}\n`)
+    const topic = parsed.positionals[0] === "help" ? parsed.positionals[1] : parsed.positionals[0]
+    const help = COMMAND_HELP[topic ?? ""] ?? HELP.trim()
+    if (isJson()) emit({ command: topic ?? null, help })
+    else process.stdout.write(`${help}\n`)
     return
   }
 
-  setJson(Boolean(parsed.values.json))
   if (parsed.values.version) {
     if (isJson()) emit({ name: "design-rover", version: CLI_VERSION })
     else process.stdout.write(`${CLI_VERSION}\n`)
@@ -98,11 +193,12 @@ async function main() {
   const command = parsed.positionals[0] ?? "status"
   const rest = parsed.positionals.slice(1)
   const engine = await createEngine(root)
+  const commandCwd = parsed.values.cwd ? root : undefined
 
   if (command === "status" || command === undefined) {
     const report = await engine.status()
     const extra = report.initialized ? await engine.syncPreview({ incremental: true }) : undefined
-    printStatus(report, { changes: extra?.diff.changes })
+    printStatus(report, { changes: extra?.diff.changes, workflow: extra?.model ? workflowFor(extra.model, report.staleGenerated, commandCwd) : { pending: 0, generatedFiles: 0, staleGenerated: [], cwd: commandCwd } })
     return
   }
 
@@ -111,108 +207,83 @@ async function main() {
       approve: Boolean(parsed.values.approve),
       generate: Boolean(parsed.values.generate),
     })
+    const workflow = workflowFor(result.model, result.diff.generated.stale, commandCwd)
     printInitSummary({
       directory: path.relative(root, engine.specDir),
-      framework: result.snapshot.framework.name,
-      styling: result.snapshot.styling.systems,
-      counts: {
-        components: result.snapshot.components.length,
-        tokens: result.snapshot.tokens.length,
-        patterns: result.snapshot.patterns.length,
-        conventions: result.snapshot.conventions.length,
-        intents: result.snapshot.intents.length,
-        exceptions: result.snapshot.exceptions.length,
-      },
-      pending: [...result.model.patterns, ...result.model.conventions, ...result.model.intents, ...result.model.exceptions].filter((item) => item.status === "suggested" || item.status === "inferred").length,
+      framework: result.model.system.framework.name,
+      styling: result.model.system.styling.systems,
+      counts: countsOf(result.model),
+      pending: workflow.pending,
+      created: !engine.initialized,
+      observedCounts: countsOf(result.snapshot),
+      syncStatus: result.diff.syncStatus,
+      pendingChanges: result.diff.changes.length,
+      generatedFiles: workflow.generatedFiles,
+      staleGenerated: workflow.staleGenerated,
+      apiResolution: workflow.apiResolution!,
+      nextSteps: onboardingCommands(workflow, result.diff.changes.some((change) => change.entity !== "projection")),
+      ignoredOptions: engine.initialized ? [parsed.values.approve ? "--approve" : undefined, parsed.values.generate ? "--generate" : undefined].filter((item): item is string => Boolean(item)) : [],
+      workflow,
     })
     return
   }
 
   if (command === "sync") {
     const preview = await engine.syncPreview({ incremental: true, base: parsed.values.base })
-    if (!preview.model) fail("Design Rover is not initialized. Run `design-rover init`.")
-    if (isJson()) {
-      if (parsed.values.yes) {
-        await engine.applyChanges(undefined, {
-          generate: true,
-          approveInferred: Boolean(parsed.values.approve),
-        })
+    if (!preview.model) fail("Design Rover is not initialized. Run " + cliCommand("init", commandCwd) + ".")
+    const workflow = workflowFor(preview.model, preview.diff.generated.stale, commandCwd)
+    const selected = preview.diff.changes.filter((change) => parsed.values.approve ? change.entity !== "projection" : observedSyncChange(change))
+    if (!isJson()) printDiff(preview.diff, workflow)
+    if (!parsed.values.yes) {
+      if (!selected.length) {
+        if (!isJson()) {
+          line(workflow.pending ? "  Pending inferences were left unchanged. Review their evidence, then approve or reject individual records." : "  Preview only. No observation updates need applying.")
+          if (!workflow.generatedFiles || workflow.staleGenerated.length) printNextAction(cliCommand("generate", commandCwd), "Refresh agent guidance without approving pending inferences.")
+          line()
+        }
+        if (isJson()) emit(preview.diff)
+        return
       }
-      emit(parsed.values.yes ? (await engine.syncPreview()).diff : preview.diff)
-      return
-    }
-    header()
-    line("  Scanning changes...")
-    line()
-    line(`  ${pc.green("✓")}  ${preview.snapshot.components.length} components`)
-    line(`  ${pc.green("✓")}  ${preview.snapshot.tokens.length} tokens`)
-    line(`  ${pc.green("✓")}  ${preview.snapshot.patterns.length} patterns`)
-    line(`  ${pc.green("✓")}  ${preview.snapshot.conventions.length} conventions`)
-    line(`  ${pc.green("✓")}  ${preview.snapshot.intents.length} intents`)
-    line(`  ${pc.green("✓")}  ${preview.snapshot.exceptions.length} exceptions`)
-    line()
-    if (preview.evidence && preview.snapshot.incremental && preview.snapshot.changedFiles.length) {
-      line(`  ${preview.snapshot.changedFiles.length} relevant files changed.`)
-      line("  Re-analyzing affected system areas...")
-      line()
-    }
-    if (!preview.diff.changes.length) {
-      line(`  ${pc.green("✓")}  No proposed system changes.`)
-      const pending = [
-        ...preview.model.patterns.filter((item) => item.status === "suggested"),
-        ...preview.model.conventions.filter((item) => item.status === "inferred"),
-        ...preview.model.intents.filter((item) => item.status === "suggested"),
-      ]
-      if (pending.length && (parsed.values.yes || parsed.values.approve)) {
-        await engine.applyChanges([], { approveInferred: true, generate: true })
-        line(`  Approved ${pending.length} inferred entries.`)
-      } else if (pending.length) {
+      if (isJson() || !process.stdin.isTTY) {
+        if (isJson()) emit(preview.diff)
+        else {
+          line("  Preview only. No changes were applied.")
+          printNextAction(cliCommand("sync --yes" + (parsed.values.approve ? " --approve" : ""), commandCwd), parsed.values.approve ? "After review, explicitly accept updates and approve pending inferences." : "After review, accept observed updates; leave pending inferences unapproved.")
+          line()
+        }
+        return
+      }
+      const apply = await clack.confirm({
+        message: parsed.values.approve ? "Apply reviewed changes and explicitly approve pending inferences?" : "Apply observed updates and refresh guidance? Pending inferences remain unapproved.",
+        initialValue: false,
+      })
+      if (clack.isCancel(apply) || !apply) {
+        line("  Left unchanged.")
         line()
-        line(`  ${pending.length} inferred entries still need approval.`)
-        line(`  Run ${pc.bold("design-rover sync --yes --approve")} after review.`)
+        return
       }
-      line()
-      return
     }
-    line("  Changes detected:")
-    line()
-    printChangeList(preview.diff.changes)
-    line()
-    line("  Proposed changes:")
-    preview.diff.changes.forEach((change, index) => {
-      line(`    [${index + 1}] ${change.summary}`)
+    await engine.applyChanges(selected.map((change) => change.id), {
+      generate: true,
+      approveInferred: Boolean(parsed.values.approve),
     })
-    line()
-    if (parsed.values.yes) {
-      await engine.applyChanges(undefined, { generate: true, approveInferred: Boolean(parsed.values.approve) })
-      line("  Applied. Generated context updated.")
-      line()
+    const after = await engine.syncPreview({ incremental: true })
+    if (isJson()) {
+      emit(after.diff)
       return
     }
-    if (!process.stdin.isTTY) {
-      line("  Pass --yes to apply in non-interactive mode.")
-      line()
-      return
-    }
-    const apply = await clack.confirm({
-      message: "Apply changes?",
-      initialValue: false,
-    })
-    if (clack.isCancel(apply) || !apply) {
-      line("  Left unchanged.")
-      line()
-      return
-    }
-    await engine.applyChanges(undefined, { generate: true })
-    line("  Applied. Generated context updated.")
+    const next = workflowFor(after.model!, after.diff.generated.stale, commandCwd)
+    line(parsed.values.approve ? "  Applied reviewed changes and explicit inference approvals. Generated guidance refreshed." : "  Applied observed updates. Generated guidance refreshed; unreviewed inferences remain unapproved.")
+    if (next.pending) line("  " + next.pending + " inferences still need an approve or reject decision.")
+    printWorkflow(next, { changes: after.diff.changes.some((change) => change.entity !== "projection") })
     line()
     return
   }
 
   if (command === "check") {
-    if (!(await isInitialized(root))) fail("Design Rover is not initialized. Run `design-rover init`.")
+    if (!(await isInitialized(root))) fail("Design Rover is not initialized. Run " + cliCommand("init", commandCwd) + ".")
     const result = await engine.check({ base: parsed.values.base })
-    printCheck(result.report)
+    printCheck(result.report, workflowFor(result.model, await engine.generatedStale(), commandCwd))
     const freshErrors = result.report.diagnostics.filter(
       (item) => !item.baseline && item.severity === "error",
     )
@@ -223,7 +294,7 @@ async function main() {
   if (command === "diff") {
     const preview = await engine.syncPreview({ incremental: true, base: parsed.values.base })
     if (!preview.model) fail("Design Rover is not initialized. Run `design-rover init`.")
-    printDiff(preview.diff)
+    printDiff(preview.diff, workflowFor(preview.model, preview.diff.generated.stale, commandCwd))
     return
   }
 
@@ -277,8 +348,12 @@ async function main() {
     if (isJson()) emit(generated.files)
     else {
       header()
-      line("  Wrote generated context:")
+      line("  Wrote agent guidance from canonical knowledge:")
       for (const file of generated.files) line(`    ${file.path}`)
+      const model = (await engine.load())!
+      const workflow = workflowFor(model, await engine.generatedStale(), commandCwd)
+      printReadiness(workflow)
+      printWorkflow(workflow)
       line()
     }
     return
@@ -314,21 +389,31 @@ async function main() {
   }
 
   if (command === "approve") {
-    await engine.applyChanges(rest.length ? rest : undefined, {
+    const model = await engine.applyChanges(rest.length ? rest : undefined, {
       approveInferred: rest.length === 0,
       generate: true,
     })
     if (isJson()) emit({ ok: true })
-    else line("  Approved.")
+    else {
+      line("  Approved the selected decision and refreshed agent guidance.")
+      const workflow = workflowFor(model, await engine.generatedStale(), commandCwd)
+      printReadiness(workflow)
+      printWorkflow(workflow)
+    }
     line()
     return
   }
 
   if (command === "reject") {
     if (!rest.length) fail("Usage: design-rover reject <id>")
-    await engine.applyChanges(rest, { reject: true, generate: false })
+    const model = await engine.applyChanges(rest, { reject: true, generate: false })
     if (isJson()) emit({ ok: true })
-    else line("  Remembered. A changed inference can be reviewed again when its evidence changes.")
+    else {
+      line("  Rejected. A changed inference can be reviewed again when its evidence changes.")
+      const workflow = workflowFor(model, await engine.generatedStale(), commandCwd)
+      printReadiness(workflow)
+      printWorkflow(workflow)
+    }
     line()
     return
   }
@@ -362,7 +447,7 @@ async function main() {
         staleGenerated: stale,
       })
     } else {
-      printCheck(result.report)
+      printCheck(result.report, workflowFor(result.model, stale, commandCwd))
     }
     if (process.env.GITHUB_STEP_SUMMARY) {
       const { writeFile } = await import("node:fs/promises")

@@ -1,6 +1,8 @@
 import { entityId, type TokenRecord } from "@design-rover/model"
 import type { RepoEvidence } from "../evidence.ts"
 import { shortHash } from "../hash.ts"
+import { classReferencesToken, themeTokenNames } from "../token-usage.ts"
+import postcss from "postcss"
 
 function categoryOf(name: string): TokenRecord["category"] {
   const n = name.replace(/^--/, "")
@@ -24,20 +26,27 @@ function categoryOf(name: string): TokenRecord["category"] {
   return "other"
 }
 
-function usageCount(evidence: RepoEvidence, tokenName: string): number {
-  const needle = tokenName.replace(/^--/, "")
-  let count = 0
+function usageCount(evidence: RepoEvidence, tokenName: string, theme: boolean, cssReferences: Map<string, number>): number {
+  let count = cssReferences.get(tokenName) ?? 0
   for (const file of evidence.files) {
     for (const hit of file.classes) {
-      count += hit.classes.filter((cls) => cls.includes(needle) || cls.includes(tokenName)).length
+      count += hit.classes.filter((cls) => classReferencesToken(cls, tokenName, theme)).length
     }
-    count += file.cssVariables.filter((item) => item.name === tokenName).length
   }
   return count
 }
 
 export function analyzeTokens(evidence: RepoEvidence): TokenRecord[] {
   const tokens = new Map<string, TokenRecord>()
+  const cssReferences = new Map<string, number>()
+  for (const file of evidence.files.filter((file) => file.kind === "style")) {
+    postcss.parse(file.content, { from: file.relative }).walkDecls((declaration) => {
+      for (const match of declaration.value.matchAll(/\bvar\(\s*(--[^\s,)]+)\s*(?=[,)])/g)) {
+        const name = match[1]!
+        cssReferences.set(name, (cssReferences.get(name) ?? 0) + 1)
+      }
+    })
+  }
 
   for (const file of evidence.files) {
     for (const variable of file.cssVariables) {
@@ -115,9 +124,10 @@ export function analyzeTokens(evidence: RepoEvidence): TokenRecord[] {
     }
   }
 
+  const themeNames = themeTokenNames(evidence)
   const result = [...tokens.values()].map((token) => ({
     ...token,
-    usageCount: usageCount(evidence, token.name),
+    usageCount: usageCount(evidence, token.name, themeNames.has(token.name), cssReferences),
   }))
   return result.sort((a, b) => a.id.localeCompare(b.id))
 }

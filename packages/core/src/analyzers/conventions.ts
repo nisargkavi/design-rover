@@ -15,8 +15,19 @@ export function analyzeConventions(evidence: RepoEvidence): ConventionRecord[] {
   const inline = jsxClassHits.filter((hit) => !hit.exported).length
 
   const images = evidence.files.flatMap((file) => file.images)
-  const nextImages = images.filter((item) => item.nextImage).length
   const imgTags = images.filter((item) => item.tag === "img").length
+  const nextImports = evidence.files.flatMap((file) => {
+    const names = file.imports.filter((item) => item.source === "next/image" && !item.isTypeOnly)
+      .flatMap((item) => [
+        ...(item.defaultName ? [item.defaultName] : []),
+        ...(item.bindings ?? []).filter((binding) => binding.imported === "default" && !binding.isTypeOnly).map((binding) => binding.local),
+      ])
+    return file.jsx.filter((item) => names.includes(item.tag))
+  })
+  const nextImages = nextImports.length
+  // The parser also records components named Image. A name alone does not
+  // establish next/image, and an aliased next/image import may have another name.
+  const imageCount = images.length + nextImports.filter((item) => !images.some((image) => image.file === item.file && image.startLine === item.startLine && image.tag === item.tag)).length
 
   const pageFiles = evidence.files.filter((file) =>
     /(^|\/)(page|layout)\.(t|j)sx?$/.test(file.relative),
@@ -35,6 +46,7 @@ export function analyzeConventions(evidence: RepoEvidence): ConventionRecord[] {
   const arbitrary = classHits.flatMap((hit) => hit.classes).filter(isArbitrary)
   const dependencies = { ...(evidence.packageJson?.dependencies as Record<string, unknown> ?? {}), ...(evidence.packageJson?.devDependencies as Record<string, unknown> ?? {}) }
   const hasTailwind = "tailwindcss" in dependencies || evidence.files.some((file) => /tailwind\.config\./.test(file.relative) || /(?:@import\s+["']tailwindcss|@tailwind\b|@theme\b)/.test(file.content))
+  const hasNext = "next" in dependencies || nextImages > 0
 
   const conventions: ConventionRecord[] = []
 
@@ -95,38 +107,46 @@ export function analyzeConventions(evidence: RepoEvidence): ConventionRecord[] {
     ],
   })
 
-  if (images.length) {
+  if (imageCount) {
+    const prefersNextImage = hasNext && nextImages > 0 && nextImages > imgTags
+    const usesNativeImages = imgTags > 0 && nextImages === 0
     conventions.push({
       id: entityId("convention", "images"),
       name: "Application images",
       category: "assets",
-      observed: `${nextImages} next/image usages, ${imgTags} raw <img> tags.`,
+      observed: hasNext
+        ? `${nextImages} verified next/image usages, ${imgTags} native <img> elements.`
+        : `${imgTags} native <img> elements, ${imageCount - imgTags} other image or placeholder usages.`,
       inference:
-        nextImages >= imgTags
+        prefersNextImage
           ? "This repository prefers next/image for application images."
-          : "This repository still uses raw img tags in places.",
+          : usesNativeImages
+            ? "This repository uses native <img> elements for application images."
+            : "This repository uses the image components and elements observed in its source.",
       suggestion:
-        nextImages >= imgTags
+        prefersNextImage
           ? "Use next/image for application images unless an exception exists."
           : "Follow the surrounding file when choosing an image component.",
       guidance:
-        nextImages >= imgTags
+        prefersNextImage
           ? "Use next/image for application images."
-          : "Do not invent an image convention the repository does not follow.",
+          : usesNativeImages
+            ? "Use native <img> elements where the surrounding code does; preserve the repository's asset paths and accessibility attributes."
+            : "Match the image components and elements used by the surrounding code.",
       metric: {
-        numerator: nextImages,
-        denominator: images.length,
-        label: "next/image",
+        numerator: nextImages > 0 ? nextImages : imgTags,
+        denominator: imageCount,
+        label: nextImages > 0 ? "next/image" : "native img",
       },
       status: "inferred",
-      confidence: images.length >= 3 ? "high" : "medium",
+      confidence: imageCount >= 3 ? "high" : "medium",
       originKind: "implementation",
       evidence: [
         {
           id: "convention.images:count",
           kind: "image-usage",
           description: `${nextImages} next/image / ${imgTags} img`,
-          count: images.length,
+          count: imageCount,
         },
       ],
     })

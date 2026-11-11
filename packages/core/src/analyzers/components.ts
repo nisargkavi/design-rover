@@ -4,6 +4,7 @@ import type { ExtractedComponent, RepoEvidence } from "../evidence.ts"
 import { shortHash } from "../hash.ts"
 import { resolveComponent } from "../component-resolution.ts"
 import { resolveComponentProps } from "../type-resolution.ts"
+import { classReferencesToken, themeTokenNames } from "../token-usage.ts"
 
 function isUiPath(file: string): boolean {
   return /(^|\/)(components\/ui|ui\/|components\/primitives)\//.test(file)
@@ -62,12 +63,11 @@ function componentUsages(evidence: RepoEvidence, candidates: { name: string; sou
     .map(([file, count]) => ({ file, count })).sort((a, b) => a.file.localeCompare(b.file))]))
 }
 
-function relatedTokens(classNames: string[], tokenNames: string[]): string[] {
+function relatedTokens(classNames: string[], tokenNames: string[], themeNames: Set<string>): string[] {
   const related = new Set<string>()
   for (const cls of classNames) {
     for (const token of tokenNames) {
-      const needle = token.replace(/^--/, "")
-      if (cls.includes(needle)) related.add(token)
+      if (classReferencesToken(cls, token, themeNames.has(token))) related.add(token)
     }
   }
   return [...related].sort()
@@ -78,6 +78,7 @@ export function analyzeComponents(
   tokenNames: string[],
 ): ComponentRecord[] {
   const records: ComponentRecord[] = []
+  const themeNames = themeTokenNames(evidence)
   const candidates = evidence.files.flatMap((file) => file.components.map((component) => ({
     name: component.name, source: file.relative, exportName: component.isDefault ? "default" : component.exportName,
   })))
@@ -98,7 +99,7 @@ export function analyzeComponents(
           ? "feature-local"
           : isPageFile(file.relative)
             ? "colocated"
-            : usage.length >= 2
+            : usage.filter((item) => !/(?:^|\/)(?:__tests__|__mocks__|tests?|e2e)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(item.file)).length >= 2
               ? "shared"
               : "feature-local"
 
@@ -106,7 +107,7 @@ export function analyzeComponents(
       const identity = `${file.relative}:${exportName}`
       const key = entityId("component", `${component.name}-${shortHash(identity, 16)}`)
 
-      records.push(toRecord(evidence, component, usage, architecture, local, key, tokenNames))
+      records.push(toRecord(evidence, component, usage, architecture, local, key, tokenNames, themeNames))
     }
   }
 
@@ -121,6 +122,7 @@ function toRecord(
   local: boolean,
   id: string,
   tokenNames: string[],
+  themeNames: Set<string>,
 ): ComponentRecord {
   const api = resolveComponentProps(evidence, component)
   return {
@@ -141,7 +143,7 @@ function toRecord(
     sizes: component.sizes,
     composition: component.composition,
     dependencies: component.composition,
-    relatedTokens: relatedTokens(component.classNames, tokenNames),
+    relatedTokens: relatedTokens(component.classNames, tokenNames, themeNames),
     usage,
     examples: usage.slice(0, 3).map((item) => item.file),
     architecture,

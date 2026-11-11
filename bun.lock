@@ -51,7 +51,7 @@
     },
     "packages/cli": {
       "name": "design-rover",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "bin": {
         "design-rover": "./dist/bin.js",
       },

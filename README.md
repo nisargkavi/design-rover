@@ -90,4 +90,4 @@ bun run smoke:cli
 
 Read the [contribution guide](CONTRIBUTING.md) before opening an issue or pull request. See [development and releases](docs/development.md) for source commands, package validation and publishing.
 
-[npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.3.3 release notes](docs/releases/v0.3.3.md) · [MIT license](LICENSE)
+[npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.3.4 release notes](docs/releases/v0.3.4.md) · [MIT license](LICENSE)

@@ -19,7 +19,7 @@ The smoke check installs the packaged tarball into a fresh project and exercises
 bun run --filter @design-rover/web build
 ```
 
-`pack:cli` bundles workspace code, then stages a public manifest without development-only workspace dependencies. Source manifests stay unchanged. To keep validation artifacts outside the checkout, use `bun run pack:cli /absolute/path/to/artifacts` and `node scripts/smoke-cli.mjs /absolute/path/to/artifacts/design-rover-0.3.2.tgz`.
+`pack:cli` bundles workspace code, then stages a public manifest without development-only workspace dependencies. Source manifests stay unchanged. To keep validation artifacts outside the checkout, use `bun run pack:cli /absolute/path/to/artifacts` and `node scripts/smoke-cli.mjs /absolute/path/to/artifacts/design-rover-0.3.3.tgz`.
 
 Run the CLI from source without installing it globally:
 
@@ -74,4 +74,4 @@ If a version tag exists but publication or release assets failed, fix the config
 
 Validation runs again. The resume script verifies that the checked-out tree matches that tag, checks release identity, rebuilds and smoke-tests the candidate, then resumes publication. Existing npm or mirror versions must pass content verification before being reused. The final GitHub assets come from the verified npm download. A content mismatch requires a new fix release; the retry does not silently accept different package bytes.
 
-[GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [Release notes](releases/v0.3.2.md)
+[GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [Release notes](releases/v0.3.3.md)

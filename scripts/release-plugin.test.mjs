@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { analyzeCommits } from "@semantic-release/commit-analyzer"
 import config from "../release.config.mjs"
-import { registryVersion } from "./release-plugin.mjs"
+import { registryVersion, waitForRegistry } from "./release-plugin.mjs"
 
 test("only an explicit registry 404 permits a new publication", async () => {
   assert.equal(await registryVersion("0.3.2", async () => ({ status: 404 })), false)
@@ -22,6 +22,30 @@ test("registry version arguments cannot become paths or prerelease publications"
     await assert.rejects(registryVersion(version, async () => { requests += 1 }))
   }
   assert.equal(requests, 0)
+})
+test("allows registry processing longer than three minutes", async () => {
+  let requests = 0
+  let waits = 0
+  await waitForRegistry("0.3.2", {
+    fetchImpl: async () => ++requests <= 20 ? { status: 404 } : { ok: true, json: async () => ({ name: "design-rover", version: "0.3.2" }) },
+    sleep: async (milliseconds) => { assert.equal(milliseconds, 10_000); waits += 1 },
+  })
+  assert.equal(requests, 21)
+  assert.equal(waits, 20)
+})
+test("registry processing retries are bounded and preserve an actionable recovery error", async () => {
+  let waits = 0
+  await assert.rejects(waitForRegistry("0.3.2", {
+    attempts: 3, fetchImpl: async () => ({ status: 404 }), sleep: async () => { waits += 1 },
+  }), /Resume this tagged release/)
+  assert.equal(waits, 2)
+})
+test("authentication and network errors do not enter the processing retry loop", async () => {
+  let waits = 0
+  await assert.rejects(waitForRegistry("0.3.2", {
+    fetchImpl: async () => ({ status: 401, ok: false }), sleep: async () => { waits += 1 },
+  }), /publication was not attempted/)
+  assert.equal(waits, 0)
 })
 for (const [message, expected] of [
   ["fix: preserve approvals", "patch"],

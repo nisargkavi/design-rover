@@ -53,7 +53,7 @@ A push to `main` starts the [Release workflow](https://github.com/nisargkavi/des
 1. The reusable [test workflow](https://github.com/nisargkavi/design-rover/actions/workflows/test.yml) validates Linux on Node 20, 22 and 24, and macOS on Node 24. It runs typechecking, library tests, release-script tests, packaging and the fresh-install smoke check.
 2. `semantic-release` reads `release.config.mjs`. The preparation plugin keeps curated release notes when present, generates missing notes, updates the public CLI version, matching constant, Bun lock entry and current documentation, then builds, packs and smoke-tests the release candidate. Private workspace versions stay unchanged.
 3. `@semantic-release/git` records those source changes in a release commit marked `[skip ci]`; semantic-release creates its matching `vX.Y.Z` tag.
-4. The publish plugin publishes `design-rover` to npm through trusted publishing, downloads the registry artifact, verifies its SHA512 integrity and package files against the local candidate, and smoke-tests the downloaded package.
+4. The publish plugin publishes `design-rover` to npm through trusted publishing, waits up to 15 minutes for npm processing, downloads the registry artifact, verifies its SHA512 integrity and package files against the local candidate, and smoke-tests the downloaded package.
 5. The verified package supplies the scoped GitHub Packages mirror, `@nisargkavi/design-rover`. A GitHub Release receives the exact verified npm tarball and `SHA256SUMS`.
 
 The publishing job uses Node 24, npm 11.20.0 and Bun 1.4.4. This does not change the packaged CLI's Node >=20.19.0 requirement. Follow the workflow's actual results to determine whether a release completed.

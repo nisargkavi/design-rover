@@ -27,6 +27,20 @@ export async function registryVersion(version, fetchImpl = fetch) {
   return true
 }
 
+export async function waitForRegistry(version, {
+  attempts = 90,
+  delayMs = 10_000,
+  fetchImpl = fetch,
+  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+} = {}) {
+  assert(Number.isInteger(attempts) && attempts > 0)
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await registryVersion(version, fetchImpl)) return
+    if (attempt < attempts - 1) await sleep(delayMs)
+  }
+  throw new Error("npm has not made the version available yet. Resume this tagged release after registry scanning finishes.")
+}
+
 export function verifyConditions() {
   assert(process.env.GH_TOKEN || process.env.GITHUB_TOKEN, "A GitHub token is required for release tags and assets.")
 }
@@ -56,12 +70,7 @@ export async function publish(_options, { cwd = process.cwd(), nextRelease }) {
   if (!await registryVersion(version)) {
     run("npm", ["publish", tarball, "--access", "public", "--tag", "latest", "--ignore-scripts"], cwd)
   }
-  let available = false
-  for (let attempt = 0; attempt < 18; attempt += 1) {
-    if (await registryVersion(version)) { available = true; break }
-    await new Promise((resolve) => setTimeout(resolve, 10_000))
-  }
-  assert(available, "npm has not made the version available yet. Resume this tagged release after registry scanning finishes.")
+  await waitForRegistry(version)
   const destination = path.join(cwd, "dist/release")
   await fs.rm(destination, { recursive: true, force: true })
   await prepareReleaseAssets({ version, localTarball: tarball, destination })

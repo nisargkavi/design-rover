@@ -26,7 +26,10 @@ async function runHook(file: string, root: string, fakeBin: string, capture: str
       stdio: ["pipe", "pipe", "pipe"],
     })
     child.on("error", reject)
-    child.on("exit", resolve)
+    // A deliberately failing hook can close stdin before the parent writes.
+    // Preserve its exit status and wait for stream errors/closure before cleanup.
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") reject(error) })
+    child.on("close", resolve)
     child.stdin.end(input)
   })
 }

@@ -2,7 +2,7 @@ export const MODEL_VERSION = 1 as const
 
 export const PRODUCT_NAME = "Design Rover"
 export const CLI_PACKAGE = "design-rover"
-export const CLI_VERSION = "0.3.5"
+export const CLI_VERSION = "0.4.0"
 export const SPEC_DIR = ".design-rover"
 export const MANAGED_START = "<!-- design-rover:start -->"
 export const MANAGED_END = "<!-- design-rover:end -->"

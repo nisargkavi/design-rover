@@ -1,6 +1,6 @@
 # Using Design Rover
 
-Run `bunx design-rover` from the project root, or add `--cwd /absolute/path/to/project`. Use a pinned release such as `bunx design-rover@0.3.5` when reproducibility matters.
+Run `bunx design-rover` from the project root, or add `--cwd /absolute/path/to/project`. Use a pinned release such as `bunx design-rover@0.4.0` when reproducibility matters.
 
 ## Discover and review
 
@@ -92,7 +92,7 @@ For MCP clients that use an `mcpServers` configuration object:
   "mcpServers": {
     "design-rover": {
       "command": "bunx",
-      "args": ["design-rover@0.3.5", "mcp", "--cwd", "/absolute/path/to/project"]
+      "args": ["design-rover@0.4.0", "mcp", "--cwd", "/absolute/path/to/project"]
     }
   }
 }

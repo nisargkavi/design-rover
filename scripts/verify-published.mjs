@@ -2,7 +2,8 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
+import { EventEmitter } from "node:events"
 import { fileURLToPath } from "node:url"
 
 const workspace = fileURLToPath(new URL("../", import.meta.url))
@@ -59,6 +60,60 @@ async function records(kind) {
   const directory = path.join(project, ".design-rover", kind)
   const files = (await fs.readdir(directory)).filter((file) => file.endsWith(".json"))
   return Promise.all(files.map(async (file) => JSON.parse(await fs.readFile(path.join(directory, file), "utf8"))))
+}
+
+function startRegistryWatch() {
+  // Own the launcher and CLI process as one group so cleanup cannot leave a
+  // background Node process behind if bunx delegates execution.
+  const grouped = process.platform !== "win32"
+  const child = spawn("bunx", [manifest.name, "watch", "--interval", "100", "--debounce", "100", "--json"], { cwd: project, env: environment, detached: grouped, stdio: ["ignore", "pipe", "pipe"] })
+  const events = []
+  const changes = new EventEmitter()
+  let pending = ""
+  let stderr = ""
+  let failure
+  let ended = false
+  child.stdout.on("data", (chunk) => {
+    pending += String(chunk)
+    while (pending.includes("\n")) {
+      const boundary = pending.indexOf("\n")
+      const line = pending.slice(0, boundary)
+      pending = pending.slice(boundary + 1)
+      if (line.trim()) {
+        try { events.push(JSON.parse(line)) } catch { failure = new Error(`Published watch did not emit NDJSON: ${line}`) }
+        changes.emit("change")
+      }
+    }
+  })
+  child.stderr.on("data", (chunk) => { stderr += String(chunk) })
+  const exit = new Promise((resolve, reject) => {
+    child.once("error", reject)
+    child.once("close", (code, signal) => { ended = true; changes.emit("change"); resolve({ code, signal }) })
+  })
+  const wait = (type, after = 0) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`Published watch did not emit ${type}: ${JSON.stringify(events)}\n${stderr}`)) }, 15000)
+    const cleanup = () => { clearTimeout(timer); changes.off("change", check) }
+    const check = () => {
+      const event = events.slice(after).find((item) => item.type === type && (type !== "updated" || item.applied > 0))
+      if (failure) { cleanup(); reject(failure) }
+      else if (event) { cleanup(); resolve(event) }
+      else if (ended || events.slice(after).some((item) => item.type === "error")) { cleanup(); reject(new Error(`Published watch stopped or failed before ${type}: ${JSON.stringify(events)}\n${stderr}`)) }
+    }
+    changes.on("change", check)
+    check()
+  })
+  const signal = (name) => {
+    try {
+      if (grouped && child.pid) process.kill(-child.pid, name)
+      else child.kill(name)
+    } catch (error) { if (error.code !== "ESRCH") throw error }
+  }
+  const stop = async () => {
+    if (!ended) signal("SIGTERM")
+    const killer = setTimeout(() => { if (!ended) signal("SIGKILL") }, 3000)
+    try { return await exit } finally { clearTimeout(killer) }
+  }
+  return { events, wait, stop }
 }
 
 try {
@@ -119,6 +174,26 @@ try {
   assert.equal(snapshot.freshness.checked, false)
   assert.ok(context.matches.some((match) => match.kind === "component" && match.record.id === button.id), "Published path retrieval missed the component used through a barrel")
   assert.ok(context.matches.some((match) => match.kind === "token" && match.record.name === "--color-text-subtle"))
+
+  const pendingConventions = await records("conventions")
+  assert.ok(pendingConventions.some((record) => record.status === "inferred" || record.status === "suggested"))
+  const watching = startRegistryWatch()
+  try {
+    await watching.wait("ready")
+    const after = watching.events.length
+    await fs.writeFile(path.join(project, "src/LiveRegistryBadge.tsx"), "export function LiveRegistryBadge() { return <span>Live registry badge</span> }\n")
+    await watching.wait("updated", after)
+    const live = JSON.parse(bunx(["context", "LiveRegistryBadge", "--no-check-freshness", "--json"]))
+    assert.ok(live.matches.some((match) => match.record.name === "LiveRegistryBadge" && match.record.status === "observed"), "Published watch did not refresh the saved component map")
+    assert.deepEqual(await records("conventions"), pendingConventions, "Published watch changed pending policy decisions")
+    const events = (await fs.readFile(path.join(project, ".design-rover/history/events.jsonl"), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    assert.equal(events.some((event) => event.type === "approved"), false, "Published watch implicitly approved knowledge")
+    await assert.rejects(fs.stat(path.join(project, "AGENTS.md")), { code: "ENOENT" })
+  } finally {
+    const stopped = await watching.stop()
+    assert.ok(stopped.code === 0 || stopped.signal === "SIGTERM", `Unexpected published watch exit: ${JSON.stringify(stopped)}`)
+  }
+  assert.equal(watching.events.at(-1).type, "stopped", "Published watch did not shut down gracefully")
   for (const [file, content] of freshFiles) assert.equal(await fs.readFile(path.join(project, file), "utf8"), content, `Source changed: ${file}`)
   await assert.rejects(fs.stat(path.join(project, "node_modules")), { code: "ENOENT" })
 
@@ -133,9 +208,10 @@ try {
     importedPropsResolved: true,
     barrelUsageResolved: true,
     boundedPathContextVerified: true,
+    liveWatchVerified: true,
     tailwindTokenLinksVerified: true,
     scopedPrimaryTokens: primary.length,
-    commands: ["bunx design-rover init", "bunx design-rover --version", "bunx design-rover status --json", "bunx design-rover check --json", "bunx design-rover context Button --path src/App.tsx --max-chars 8000 --json"],
+    commands: ["bunx design-rover init", "bunx design-rover --version", "bunx design-rover status --json", "bunx design-rover check --json", "bunx design-rover context Button --path src/App.tsx --max-chars 8000 --json", "bunx design-rover watch --json"],
     projectDependencyInstalled: false,
     sourcePreserved: true,
   }, null, 2))

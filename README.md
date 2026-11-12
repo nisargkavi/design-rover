@@ -56,6 +56,18 @@ Approved rules and observed APIs are included by default. Pending inferences req
 
 See [agent and MCP usage](docs/usage.md#ai-agents-and-mcp) for the full workflow.
 
+## Keep the component map live
+
+After `init`, leave this running in a separate terminal while you edit UI code:
+
+```sh
+bunx design-rover watch
+```
+
+Watch refreshes observed components and tokens after edits settle. Approved APIs, human annotations and pending rules stay unchanged until you review their diff and make an explicit decision. CLI and MCP requests read the updated model; freshness checks still flag unresolved changes.
+
+Generated agent instructions stay unchanged by default. Use `watch --generate` to refresh them too, and Ctrl+C to stop. See [watch options and behavior](docs/usage.md#watch-for-live-updates).
+
 ## What it understands
 
 | Area | Current support |

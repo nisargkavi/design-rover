@@ -6,6 +6,8 @@ export type { ContextOptions, ContextPacket, ContextMatch, ContextKind, ContextF
 export type { ContextRequestOptions } from "./engine.ts"
 export { diffModels, diffAgainstRepo } from "./diff.ts"
 export { createEngine } from "./engine.ts"
+export { watchRepository } from "./watch.ts"
+export type { WatchOptions, WatchEvent } from "./watch.ts"
 export { explain, searchModel } from "./explain.ts"
 export { collectEvidence, discoverFiles } from "./scan.ts"
 export {

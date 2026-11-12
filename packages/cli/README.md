@@ -23,6 +23,10 @@ Use a path that exists in your project. Canonical knowledge lives in `.design-ro
 
 Use `--no-check-freshness` for a saved snapshot without a source scan (MCP: `checkFreshness: false`). Pending approvals and outdated guidance are reported separately from source drift. Retrieval reports whole records omitted by its limits; freshness covers supported observations at the time of the check.
 
+For live updates after initialization, leave `bunx design-rover watch` running in another terminal. It polls source changes and refreshes observed components and tokens after edits settle. Approved or human-annotated records and pending policies still require explicit review; no knowledge is auto-approved. CLI and MCP requests read the updated model on their next call.
+
+Watch leaves generated agent files unchanged unless you pass `--generate`. Use Ctrl+C to stop; `--json` emits one JSON event per line. [Watch options](https://github.com/nisargkavi/design-rover/blob/main/docs/usage.md#watch-for-live-updates) cover polling, stability delays and review behavior.
+
 Component APIs resolve through supported local imports and barrel exports. Unresolved types are reported instead of presented as complete. CSS class contracts such as `.btn`/`.field` variants are outside the React component model. Analysis runs locally and does not upload application source; a clean check does not prove complete design-system conformance, visual quality or accessibility.
 
 [Full documentation](https://github.com/nisargkavi/design-rover#readme) · [CLI and agent usage](https://github.com/nisargkavi/design-rover/blob/main/docs/usage.md) · [Releases](https://github.com/nisargkavi/design-rover/releases)

@@ -33,6 +33,36 @@ bunx design-rover sync
 
 Routine sync preserves removals of approved or human-annotated records, including with `--approve`. To retire one, review its removal in `diff` and run `approve <change-id>` explicitly. Moving an unchanged exception comment or image within a file keeps its decision identity and human notes.
 
+## Watch for live updates
+
+Run `init` first, then keep watch running in a separate terminal:
+
+```sh
+bunx design-rover watch
+```
+
+Watch polls the complete supported source manifest and contents, waits for edits to settle, then refreshes observed component and token inventory. This catches additions, edits, deletions and renames, including atomic editor saves. It follows the analysis exclusions for dependencies, caches and generated tool files. It does not initialize a missing model or upload source.
+
+Only observed inventory without human annotations is updated automatically. Approved APIs and tokens, rejected records, human-authored knowledge, and pending or approved policies require explicit review. Changes to a reviewed component record, including removal, stay deferred. Run `bunx design-rover diff --json`, inspect the evidence and use the relevant `approve` or `reject` command when you decide to accept a change. Watch does not accept `--approve` or `--yes`.
+
+CLI queries and MCP tools read the updated model on their next request; watch does not push updates into an agent's existing conversation. Context freshness checks remain enabled and may still report stale source when changes require a decision. Pending approval alone remains separate from source drift.
+
+Options:
+
+| Option | Behavior |
+| --- | --- |
+| `--cwd <path>` | Watch an initialized repository at another path. |
+| `--interval <ms>` | Poll interval, default `1000`; integer from `100` to `60000`. |
+| `--debounce <ms>` | Wait for stable edits before refreshing, default `300`; integer from `100` to `60000`. |
+| `--generate` | Also regenerate agent guidance; without this flag, generated files stay unchanged. |
+| `--json` | Emit newline-delimited JSON events: `ready`, `updated`, `review`, `error` and `stopped`. |
+
+Polling provides consistent behavior across supported systems; updates arrive after the polling and stability delays. Cycles run serially. Invalid source/configuration syntax or unreadable inputs stop a refresh before observations are saved. Conflicting saves retry against the latest model. Fix the reported problem and watch resumes. Stop with Ctrl+C or SIGTERM; any write already in progress finishes before exit.
+
+With `--generate`, an observation update can succeed before guidance generation fails. Those observations stay saved and approvals stay unchanged; resolve the reported guidance problem and let watch retry, or run `generate` explicitly.
+
+Machine consumers should parse `watch --json` one line at a time. Unlike `context --json`, it is an event stream, not a single JSON document. Review events include a diff action and the repository directory to run it from. Generated guidance can become stale during watch; run `generate` when ready, or opt into `--generate`.
+
 ## Look up an API or decision
 
 ```sh

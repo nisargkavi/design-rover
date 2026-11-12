@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util"
 import path from "node:path"
-import { createEngine, isInitialized, serializeContext, gateGeneratedStale } from "@design-rover/core"
+import { createEngine, isInitialized, serializeContext, gateGeneratedStale, watchRepository } from "@design-rover/core"
 import { CLI_VERSION, type CanonicalModel, type ModelChange, type ObservedSnapshot } from "@design-rover/model"
 import { mapShadcnLint, oxlintFromMap, reconcileSources } from "@design-rover/integrations"
 import * as clack from "@clack/prompts"
@@ -34,6 +34,7 @@ Usage
   design-rover                 Show system status
   design-rover init            Analyze the repository and write .design-rover/
   design-rover sync            Review observed changes against the canonical model
+  design-rover watch           Keep observed components and tokens up to date
   design-rover check           Check the codebase against approved knowledge
   design-rover diff            Show canonical system changes
   design-rover explain <name>  Explain a component, pattern, convention, or intent
@@ -65,10 +66,30 @@ Options
   --max-chars <n> Context: maximum formatted JSON characters (default 12000)
   --include-pending  Context: include inferences and suggestions for review
   --no-check-freshness  Context: read an unchecked saved snapshot without scanning
+  --interval <ms> Watch: poll interval (default 1000, minimum 100)
+  --debounce <ms> Watch: wait for stable changes (default 300, minimum 100)
   --fail-on <level>   CI: error (default) | warning | none
 `
 
 const COMMAND_HELP: Record<string, string> = {
+  watch: `Design Rover watch
+
+Usage
+  bunx design-rover watch [--cwd <repository>] [--json]
+
+Poll supported source files and refresh observed component/token inventory after
+changes settle. Approved contracts, human annotations and all policies require
+explicit review. Watch never approves knowledge. Initialize the repository first.
+
+Options
+  --interval <ms> Poll interval, 100..60000 (default 1000)
+  --debounce <ms> Stable-change window, 100..60000 (default 300)
+  --generate      Also regenerate agent guidance; off by default
+  --cwd <path>    Repository root
+  --json          Newline-delimited JSON events (one object per line)
+
+Stop with Ctrl+C or SIGTERM. Failed scans retry without accepting decisions.
+Review deferred changes with bunx design-rover diff; approve/reject explicitly.`,
   init: `Design Rover init
 
 Usage
@@ -181,6 +202,8 @@ async function main() {
       "max-chars": { type: "string" },
       "include-pending": { type: "boolean", default: false },
       "no-check-freshness": { type: "boolean", default: false },
+      interval: { type: "string" },
+      debounce: { type: "string" },
       "fail-on": { type: "string", default: "error" },
       approve: { type: "boolean", default: false },
       generate: { type: "boolean", default: false },
@@ -207,6 +230,39 @@ async function main() {
   const rest = parsed.positionals.slice(1)
   const engine = await createEngine(root)
   const commandCwd = parsed.values.cwd ? root : undefined
+
+  if (command === "watch") {
+    if (parsed.values.approve || parsed.values.yes) fail("Watch does not accept --approve or --yes. Review decisions separately with diff and approve/reject.")
+    const controller = new AbortController()
+    const stop = () => controller.abort()
+    process.on("SIGINT", stop)
+    process.on("SIGTERM", stop)
+    try {
+      await watchRepository(root, {
+        signal: controller.signal,
+        intervalMs: parsed.values.interval === undefined ? undefined : Number(parsed.values.interval),
+        debounceMs: parsed.values.debounce === undefined ? undefined : Number(parsed.values.debounce),
+        generate: Boolean(parsed.values.generate),
+        onEvent: (event) => {
+          if (isJson()) process.stdout.write(`${JSON.stringify(event)}\n`)
+          else {
+            if (event.type === "ready") line(`Watching ${root}. Polling for settled changes; Ctrl+C to stop.`)
+            if (event.type === "error") line(`Watch error: ${event.error}`)
+            else if (event.type === "stopped") line("Watch stopped.")
+            else {
+              line(`[${event.type}] ${event.applied} observation updates; ${event.pendingChanges} deferred changes; ${event.pendingReview} pending reviews; ${event.staleGenerated} stale guidance files.`)
+              if (event.actions?.review) printNextAction(cliCommand("diff --json", commandCwd), "Review deferred changes; approve or reject decisions explicitly.")
+              if (event.actions?.generate) printNextAction(cliCommand("generate", commandCwd), "Refresh agent guidance, or opt in with watch --generate.")
+            }
+          }
+        },
+      })
+    } finally {
+      process.removeListener("SIGINT", stop)
+      process.removeListener("SIGTERM", stop)
+    }
+    return
+  }
 
   if (command === "status" || command === undefined) {
     const report = await engine.status()

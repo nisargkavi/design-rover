@@ -70,4 +70,4 @@ bun run test
 
 [Development and releases](docs/development.md) covers package checks and publishing. Reviewed canonical knowledge can be shared through Git, or kept local; choose the [tracking setup](https://nisargkavi.github.io/design-rover/guides/git-tracking/) that fits your project.
 
-[npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.5.0 release notes](docs/releases/v0.5.0.md) · [MIT license](LICENSE)
+[npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.5.1 release notes](docs/releases/v0.5.1.md) · [MIT license](LICENSE)

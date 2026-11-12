@@ -1,5 +1,21 @@
 # Development and releases
 
+## Documentation site
+
+The Astro/Starlight app is in `apps/docs/`. It renders the canonical Markdown in `docs/guides/`, `docs/reference/` and `docs/index.md`; edit those sources rather than a second copy. Relative `.md` links work on GitHub and are rewritten to site routes during the build.
+
+Use Node 24 for the docs tools (Astro requires Node >=22.23.4), with Bun 1.4.4. The CLI still supports Node >=20.19.0.
+
+```sh
+bun run docs:dev
+bun run docs:check
+bun run docs:build
+bun run docs:verify
+bun run docs:preview
+```
+
+The verifier checks built routes, anchors, assets, source edit links, search and agent text exports. The Documentation workflow validates pull requests and deploys main to GitHub Pages. `DOCS_SITE` and `DOCS_BASE` configure a different deployment URL or base path. Docs-only commits do not trigger an npm version release.
+
 Use Bun 1.4.4 for dependency installation and workspace scripts. The packaged CLI supports Node >=20.19.0.
 
 ## Validate a change

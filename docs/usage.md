@@ -1,205 +1,55 @@
 # Using Design Rover
 
-Run `bunx design-rover` from the project root, or add `--cwd /absolute/path/to/project`. Use a pinned release such as `bunx design-rover@0.5.0` when reproducibility matters.
+Start with the [documentation overview](index.md) or [quick start](guides/quickstart.md). Use the task guides for workflows and the reference pages for command and model details.
+
+Run commands from your application root, or add `--cwd /absolute/path/to/app`. Use a reviewed, pinned package version when reproducibility matters.
 
 ## Discover and review
 
-```sh
-bunx design-rover init
-bunx design-rover diff --json
-```
+Follow the [quick start](guides/quickstart.md) to initialize a project, inspect evidence and generate agent guidance.
 
-Initialization records observed inventory and leaves inferred conventions, patterns, intents and exceptions pending review. Repeating `init` preserves existing decisions. It does not rewrite application source.
-
-After reviewing a proposed record, copy its ID into the command below:
-
-```sh
-bunx design-rover approve <id>
-bunx design-rover reject <id>
-```
-
-Choose one action for each proposal. `approve` without an ID approves all pending proposals, so use it only after reviewing the complete set. Rejection remembers an inference until material evidence changes.
-
-Inventory starts as observed, not approved policy. Use `approve <component-id>` to accept a component API as a reviewed contract. `reject <approved-id>` revokes an approval, and `approve <rejected-id>` restores it. History records approval and rejection explicitly.
-
-After the implementation changes:
-
-```sh
-bunx design-rover diff
-bunx design-rover sync
-```
-
-`diff` previews changes. `sync` reviews and applies proposed observed updates. `sync --yes` applies those updates without a prompt; it does not turn pending inferred rules into approved policy. Use `approve <id>` or `sync --yes --approve` for explicit approval after review.
-
-Routine sync preserves removals of approved or human-annotated records, including with `--approve`. To retire one, review its removal in `diff` and run `approve <change-id>` explicitly. Moving an unchanged exception comment or image within a file keeps its decision identity and human notes.
+[Review and approvals](guides/review.md) explains observed inventory, pending rules, individual decisions and manual sync. Approved or human-annotated removals require their explicit removal change ID.
 
 ## Watch for live updates
 
-Run `init` first, then keep watch running in a separate terminal:
+[Watch mode](guides/watch.md) keeps observed components and tokens current as you edit. The guide covers polling, debounce, generated guidance, JSON events, errors and clean shutdown.
 
-```sh
-bunx design-rover watch
-```
-
-Watch polls the complete supported source manifest and contents, waits for edits to settle, then refreshes observed component and token inventory. This catches additions, edits, deletions and renames, including atomic editor saves. It follows the analysis exclusions for dependencies, caches and generated tool files. It does not initialize a missing model or upload source.
-
-Only observed inventory without human annotations is updated automatically. Approved APIs and tokens, rejected records, human-authored knowledge, and pending or approved policies require explicit review. Changes to a reviewed component record, including removal, stay deferred. Run `bunx design-rover diff --json`, inspect the evidence and use the relevant `approve` or `reject` command when you decide to accept a change. Watch does not accept `--approve` or `--yes`.
-
-CLI queries and MCP tools read the updated model on their next request; watch does not push updates into an agent's existing conversation. Context freshness checks remain enabled and may still report stale source when changes require a decision. Pending approval alone remains separate from source drift.
-
-Options:
-
-| Option | Behavior |
-| --- | --- |
-| `--cwd <path>` | Watch an initialized repository at another path. |
-| `--interval <ms>` | Poll interval, default `1000`; integer from `100` to `60000`. |
-| `--debounce <ms>` | Wait for stable edits before refreshing, default `300`; integer from `100` to `60000`. |
-| `--generate` | Also regenerate agent guidance; without this flag, generated files stay unchanged. |
-| `--json` | Emit newline-delimited JSON events: `ready`, `updated`, `review`, `error` and `stopped`. |
-
-Polling provides consistent behavior across supported systems; updates arrive after the polling and stability delays. Cycles run serially. Invalid source/configuration syntax or unreadable inputs stop a refresh before observations are saved. Conflicting saves retry against the latest model. Fix the reported problem and watch resumes. Stop with Ctrl+C or SIGTERM; any write already in progress finishes before exit.
-
-With `--generate`, an observation update can succeed before guidance generation fails. Those observations stay saved and approvals stay unchanged; resolve the reported guidance problem and let watch retry, or run `generate` explicitly.
-
-Machine consumers should parse `watch --json` one line at a time. Unlike `context --json`, it is an event stream, not a single JSON document. Review events include a diff action and the repository directory to run it from. Generated guidance can become stale during watch; run `generate` when ready, or opt into `--generate`.
+Approved records, human annotations and policies stay deferred for explicit review.
 
 ## Look up an API or decision
 
-```sh
-bunx design-rover query Button --json
-bunx design-rover explain <id>
-bunx design-rover context "add a billing form" --path app/billing/page.tsx --limit 20 --max-chars 12000 --json
-```
+Use [task context](guides/context.md) to find existing components and relevant design decisions. It explains query/path scoping, whole-record budgets, source references and omission warnings.
 
-`query` searches whole records. `explain` shows readable details. Repeated component names require a source or ID; a Button in one package is not automatically interchangeable with one in another.
-
-Task context prioritizes relevant components and applicable approved decisions. A path narrows results to the relevant repository scope. Observed APIs and approved knowledge are included by default; `--include-pending` opts into unreviewed inferences.
-
-The packet includes whole records and reports omissions when the result count or character budget is exhausted. An omitted decision still needs review. Narrow the request, increase the budget, or retrieve a specific record rather than assuming an incomplete result has no constraints.
+The [CLI reference](reference/cli.md#inspect-and-retrieve) covers direct `query`, `explain` and `status` commands.
 
 ## AI agents and MCP
 
-Retrieve context for the task:
+[Connect an MCP client](guides/mcp.md) to retrieve local context and APIs through stdio tools. To write managed AGENTS.md, CLAUDE.md, Cursor and Agent Skill guidance, follow [generated agent setup](guides/quickstart.md#give-your-agent-context).
 
-```sh
-bunx design-rover context "update the settings form" --path app/settings/page.tsx --max-chars 12000 --json
-```
-
-`context` and MCP `get_context` check supported source observations against the saved model by default. The returned records still come from that model; the check does not apply updates or approve knowledge. `status --json` remains available for a full repository summary.
-
-Inspect the packet's `freshness` before relying on its records:
-
-- `checked: true` and `checkedAt` record the point-in-time check. `sourceStatus` is `current` or `stale`, and `sourceChanges` counts proposed observation changes.
-- `pendingReview` counts unapproved knowledge; pending approval alone does not make source observations stale. `staleGenerated` separately counts outdated agent projections.
-- When observations are stale, `actions.review` shows the diff command and `actions.refresh` shows `bunx design-rover sync --yes`. Run these from `actions.cwd`: review the diff, then apply observed updates explicitly. `--yes` allows noninteractive application; it does not approve pending rules. Resolve proposals that require explicit approval or rejection, including protected removals, then request context again. Outdated projections alone receive an `actions.generate` command.
-
-A current result means the supported comparison found no new source proposals. Rejected proposals remain suppressed, and unsupported code can remain unresolved. Freshness is not proof of complete analysis or protection against edits made after the check. Read the referenced implementation before using an API whose resolution is incomplete. A failed freshness check returns an error rather than claiming the snapshot is current.
-
-For an explicit saved snapshot without inspecting source:
-
-```sh
-bunx design-rover context "update the settings form" --path app/settings/page.tsx --no-check-freshness --json
-```
-
-MCP `get_context` accepts `checkFreshness: false` for the same behavior. Snapshot-only results report `freshness.checked: false`; pure library `retrieveContext` also remains snapshot-only.
-
-Source inspection (`context`, `get_context`, `status`, `diff`, `check` and MCP `get_system`) may refresh the ignored `.design-rover/cache/evidence.json` source-text cache. Context freshness checks preserve the saved model, approvals, history, generated guidance and application source. Snapshot-only retrieval does not refresh the cache.
-
-Generate agent instruction projections with:
-
-```sh
-bunx design-rover generate
-```
-
-This writes managed AGENTS.md and CLAUDE.md sections, a Cursor rule and an Agent Skill. Notes outside managed blocks are preserved. Customized generated adapters require resolution rather than silent replacement. The projections guide retrieval; `.design-rover/` holds the actual knowledge.
-
-Managed writes refuse symlinked targets or child directories, including `.design-rover/`, before writing. A symlink used to address the repository root itself is supported.
-
-For MCP clients that use an `mcpServers` configuration object:
-
-```json
-{
-  "mcpServers": {
-    "design-rover": {
-      "command": "bunx",
-      "args": ["design-rover@0.5.0", "mcp", "--cwd", "/absolute/path/to/project"]
-    }
-  }
-}
-```
-
-Use `get_context` for bounded task/path retrieval, `get_component` for APIs, and `check_code` for snippet findings. Missing models and ambiguous APIs are reported explicitly. Pending knowledge is opt-in.
+[Context freshness](guides/context.md#handle-stale-knowledge) explains default checks, returned review/refresh actions and explicit snapshot-only retrieval. Context requests do not apply updates or approve knowledge.
 
 ## Check changes and adopt gradually
 
-```sh
-bunx design-rover check --json
-bunx design-rover baseline
-bunx design-rover ci --fail-on warning --json
-```
+[CI and gradual adoption](guides/ci.md) covers findings, failure thresholds, reviewed baselines, pre-push hooks and GitHub Actions installation.
 
-`check` reports conformance and drift findings. `baseline` records current findings as existing debt, so review its scope before accepting it. CI supports `--fail-on error`, `warning`, or `none`; the exit status and JSON `ok` field describe the same gate decision.
-
-Confirmed API changes or removal of an approved component are errors. Changes to observed APIs are informational; incomplete type resolution produces advisory findings rather than a confirmed API break. Usage/restyling findings remain warnings, so choose `--fail-on warning` to gate them. The default CI and pre-push gates block errors and stale required guidance.
-
-Missing untracked/local projections do not fail CI or the hook on a fresh checkout. Existing modified guidance and missing Git-tracked guidance do fail. `status` still reports all stale projections, including absent local snapshots, so you can regenerate them for local use.
-
-`--base <ref>` enables Git comparisons for change-oriented workflows. Invalid bases and unreadable canonical records fail explicitly instead of appearing clean. Install a pre-push hook with `bunx design-rover git install` or a GitHub Actions workflow with `bunx design-rover ci install`; existing hooks are preserved, and custom workflows require review.
-
-Approved exceptions match paths using gitignore-style patterns and can additionally constrain a component name or ID. Their `allows` field can name `restyle-spacing`, exact classes, or the broader `local-override`. A color exception does not suppress an unrelated spacing finding.
+Read the [support boundaries](reference/limits.md) before treating a clean check as a project gate. Missing untracked local guidance and missing Git-tracked guidance have different gate behavior.
 
 ## Git tracking
 
-Choose whether the model belongs to the team or is local assistance for one developer.
+Choose a [Git tracking setup](guides/git-tracking.md) before committing the model or generated files.
 
 ### Shared team model
 
-Commit reviewed canonical records, approval/rejection history and any intentional baseline under `.design-rover/`. Review model changes together with the source changes they describe.
-
-Keep local artifacts out of commits. Recommended ignore entries are:
-
-```gitignore
-.design-rover/cache/
-.design-rover/generated/
-.design-rover/.write*/
-.design-rover/.write.lock
-.design-rover/.recovery-required.json
-```
-
-Choose separately whether to commit generated AGENTS.md, CLAUDE.md, Cursor rules and Agent Skills. Checked-in projections can help agents discover the model, but they must be regenerated when their guidance becomes stale. Do not blanket-ignore the canonical directory if the team expects its decisions to be reviewed in Git.
+[Share reviewed knowledge](guides/git-tracking.md#share-a-team-model) with teammates and CI while excluding transient caches and generated snapshots.
 
 ### Local-only setup
 
-If the model and generated instructions are private local assistance, use exact tool paths in the project's root `.gitignore`:
-
-```gitignore
-/.design-rover/
-/AGENTS.md
-/CLAUDE.md
-/.cursor/rules/design-rover.mdc
-/.agents/skills/design-rover/
-```
-
-Only ignore AGENTS.md and CLAUDE.md this way when they are new tool-generated files. Preserve existing tracked or human-authored instructions; `.gitignore` does not untrack files already committed. Avoid broad patterns such as `.cursor/`, which can hide unrelated project configuration.
-
-Inspect model contents before publishing a repository: source references and design evidence can contain project metadata. Credentials do not belong in the model.
-
-Canonical writes use locking and staged updates with rollback. After an interrupted operation, inspect `.write.lock` and any recovery marker before removing a stale lock. A `.recovery-required.json` marker blocks loads until recovery is complete; retain its referenced backup while restoring the model.
-
-Concurrent changes are checked against the model read by the operation. A conflicting save fails explicitly; reload, review the latest diff and retry. Removing a stale lock alone cannot authorize a partially written model. If `system.json` is missing while canonical records remain, restore the model instead of rerunning initialization over it. Stored repository roots are relative (`.`), so sharing the model does not share your absolute checkout path.
+[Keep the model local](guides/git-tracking.md#keep-everything-local) using exact tool paths. Preserve existing tracked or human-authored instructions.
 
 ## Supported behavior and limits
 
-Component analysis supports JSX, CVA variants and supported local TypeScript imports/re-exports. Records expose prop-resolution status and issues. External package declarations, complex type expressions, cycles, ambiguous exports and dynamic styling can remain unresolved.
+[Support and limitations](reference/limits.md) describes component/type analysis, scoped tokens, monorepo constraints, checks and experimental integrations.
 
-Tokens retain CSS selector/media scope, source identity and importance. Declarations in different files stay distinct because bundle/cascade order is unknown. Tailwind color configuration supports static object literals with nested names and `DEFAULT`; dynamic values remain unresolved and are excluded from default usable context. Token context follows supported `var()` dependencies into compatible theme scopes and reports missing references or cycles. Configuration is parsed, never executed.
+The [knowledge model](reference/model.md) explains record states, saved files, projections and approval boundaries. For recovery, stale context or watch issues, use [troubleshooting](guides/troubleshooting.md).
 
-Analysis currently reads root project configuration. Per-package tsconfig resolution, inherited configurations and non-React component templates are not fully supported; run from the relevant app root and inspect coverage before relying on a monorepo inventory.
-
-CSS class contracts such as `.btn`/`.field` variants are not represented as React component APIs. A project can follow class-based conventions that the component inventory does not describe.
-
-Checks cover supported component contract drift, basic sizing/restyling, conventions and design intent. A clean check is not proof of complete design-system conformance, visual quality, accessibility or pixel parity. `@shadcn/lint` is an optional enforcement adapter; only compatible approved policies map to its rules.
-
-`studio` opens a local read-only viewer. The separate Next.js viewer reads `DESIGN_ROVER_ROOT`. Hosted viewing requires `DESIGN_ROVER_API`, `DESIGN_ROVER_ORG`, `DESIGN_ROVER_REPO` and `DESIGN_ROVER_TOKEN`; the server requires a nonempty token. Hosted snapshots are in memory and are not durable team collaboration.
-
-Figma/Storybook support currently imports local JSON evidence. It does not fetch either service directly. CLI analysis stays local; uploading a model to a hosted service is a separate action.
+[CLI reference](reference/cli.md) · [Contribute](guides/contributing.md) · [Development and releases](development.md)

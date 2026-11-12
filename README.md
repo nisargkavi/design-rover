@@ -9,98 +9,65 @@
 [![npm version](https://img.shields.io/npm/v/design-rover)](https://www.npmjs.com/package/design-rover)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Give coding agents design knowledge from your existing codebase.**
+**Help coding agents reuse the UI you already have.**
 
-Design Rover is a local CLI for React/TypeScript projects. It records component APIs, scoped CSS tokens and UI conventions in a repository model, lets you review inferred rules, and makes that knowledge available through CLI queries, generated instructions and MCP.
+Design Rover analyzes your React/TypeScript project and records its components, design tokens and UI conventions. Give an agent the existing Button API and relevant design decisions before asking it to build another screen.
 
-Use it to find a component before rebuilding it, check the API before calling it, and review design-system changes alongside your code. It analyzes source; it does not redesign screens or rewrite application files.
+Use the local CLI, generated agent instructions or MCP to retrieve that knowledge. Review inferred rules before approving them, and keep observed components current with watch mode.
 
-## Start in five minutes
+[Documentation](https://nisargkavi.github.io/design-rover/) · [Quickstart](https://nisargkavi.github.io/design-rover/guides/quickstart/) · [MCP setup](https://nisargkavi.github.io/design-rover/guides/mcp/) · [CLI reference](https://nisargkavi.github.io/design-rover/reference/cli/)
 
-Requires Bun and Node >=20.19.0. Run these commands from the project you want to analyze; no global installation is needed.
+## Quick start
+
+Requires Bun and Node >=20.19.0. Run from the project you want to analyze:
 
 ```sh
 bunx design-rover init
 bunx design-rover diff
 ```
 
-Review the proposals, then replace `<id>` with a record or change ID from the output:
+Review the proposals, then replace `<id>` with an individual record or change ID from the output:
 
 ```sh
 bunx design-rover approve <id>
 bunx design-rover generate
+```
+
+Retrieve context for your next UI task and check your changes. Replace the example path with one in your project:
+
+```sh
+bunx design-rover context "add a settings form" --path src/App.tsx --json
 bunx design-rover check
 ```
 
-`init` writes `.design-rover/` and leaves inferred knowledge pending. Use `approve` without an ID only when you want to approve all reviewed proposals. After editing UI code, run `diff` and `sync` to review new observations. `sync --yes` skips the prompt; approving pending rules is a separate explicit choice.
+`init` creates `.design-rover/`. Observed APIs are evidence; inferred rules stay pending until explicitly approved. `generate` writes managed instructions for AGENTS.md, CLAUDE.md, Cursor and an Agent Skill. Context requests check freshness and return review/refresh actions when the saved knowledge is stale.
 
-For example, if your Button already offers a large size, a custom padding override can produce a finding that points to that API. For a resolved prop, a change from optional to required appears in the model diff. Findings include source evidence so you can decide whether they apply.
+## Live updates
 
-Approve a component ID to establish a reviewed API contract. Confirmed changes or removal then fail the default CI gate; observed inventory stays informational. Routine `sync` preserves approved or human-annotated removals until you explicitly accept their change ID. See [review and checking behavior](docs/usage.md#check-changes-and-adopt-gradually).
-
-## Use with an AI agent
-
-Retrieve context for the task and path you are editing:
-
-```sh
-bunx design-rover context "add a billing form" --path app/billing/page.tsx --max-chars 12000 --json
-```
-
-Use a path that exists in your project. `context` and MCP `get_context` check source freshness by default, then return saved knowledge with a freshness summary. When observations are stale, the packet gives commands to review the diff and, after review, apply observed updates with `sync --yes`, plus the repository directory to run them from. Retrieval does not apply updates or approve pending rules. Resolve any decisions that require explicit approval or rejection, then request context again.
-
-Use `status --json` for a full repository summary. For a saved snapshot without a freshness scan, pass `--no-check-freshness` to `context` or `checkFreshness: false` to MCP `get_context`; the result reports `freshness.checked: false`.
-
-Approved rules and observed APIs are included by default. Pending inferences require `--include-pending`. The result reports omitted records and decisions when a limit is reached: narrow the request or increase the budget rather than silently ignoring a constraint.
-
-`generate` writes AGENTS.md, CLAUDE.md, a Cursor rule and an Agent Skill. These are projections; `.design-rover/` remains the canonical model. Agents can also retrieve the same task context through MCP `get_context`.
-
-See [agent and MCP usage](docs/usage.md#ai-agents-and-mcp) for the full workflow.
-
-## Keep the component map live
-
-After `init`, leave this running in a separate terminal while you edit UI code:
+Leave watch mode running in another terminal after initialization:
 
 ```sh
 bunx design-rover watch
 ```
 
-Watch refreshes observed components and tokens after edits settle. Approved APIs, human annotations and pending rules stay unchanged until you review their diff and make an explicit decision. CLI and MCP requests read the updated model; freshness checks still flag unresolved changes.
+It refreshes observed components and tokens after edits settle. Approved contracts, human annotations and pending policies still require review. Add `--generate` to refresh agent instructions too; Ctrl+C stops the watcher.
 
-Generated agent instructions stay unchanged by default. Use `watch --generate` to refresh them too, and Ctrl+C to stop. See [watch options and behavior](docs/usage.md#watch-for-live-updates).
+See the guides for [watch mode](https://nisargkavi.github.io/design-rover/guides/watch/), [context and freshness](https://nisargkavi.github.io/design-rover/guides/context/), [approvals](https://nisargkavi.github.io/design-rover/guides/review/), [CI checks](https://nisargkavi.github.io/design-rover/guides/ci/) and [Git tracking](https://nisargkavi.github.io/design-rover/guides/git-tracking/).
 
-## What it understands
+## Supported projects
 
-| Area | Current support |
-| --- | --- |
-| Components | JSX, CVA variants, local/imported prop types and local barrel exports |
-| Tokens | CSS custom properties with selector/media scope and importance; basic Tailwind configuration |
-| Decisions | Reviewable conventions, patterns, design intent and scoped exceptions |
-| Changes | API/token drift, stale generated guidance, basic usage findings and baselines |
-| Retrieval | Task/path filtering, whole records, source references and explicit omissions |
+Supports JSX components, CVA variants, supported local TypeScript imports and barrel exports, scoped CSS custom properties and basic Tailwind configuration. Advanced types, external declarations and dynamic styling can remain unresolved; records report analysis limits. A clean check does not prove visual quality, accessibility or complete design-system conformance. Read the [support boundaries](https://nisargkavi.github.io/design-rover/reference/limits/) before relying on a result.
 
-Type resolution is limited to scanned local modules and supported static forms. External package declarations, complex TypeScript and dynamic styling can remain unresolved; records expose resolution issues. CSS class contracts such as `.btn`/`.field` variants are not represented as React component APIs. A clean check does not prove complete design-system conformance, visual quality, accessibility or Figma parity.
+## Contribute
 
-The local Studio is a read-only viewer. Figma/Storybook support is experimental JSON evidence import, and the hosted snapshot service is an in-memory prototype. See [supported behavior and limits](docs/usage.md#supported-behavior-and-limits).
-
-## Keep knowledge reviewable
-
-For a shared team workflow, commit reviewed canonical records under `.design-rover/` so decisions can be reviewed with code, while keeping caches and generated snapshots local. A local-only setup can ignore all tool artifacts instead. Choose deliberately rather than adding every generated file to Git.
-
-See [Git tracking recommendations](docs/usage.md#git-tracking) before adding the model to version control. Never commit credentials or unreviewed private metadata.
-
-## Develop and contribute
-
-Use Bun 1.4.4 in this repository:
+Bug reports, focused fixes and documentation improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, validation and pull requests. Use Bun 1.4.4 in this repository:
 
 ```sh
 bun install --frozen-lockfile
 bun run typecheck
 bun run test
-bun run test:scripts
-bun run pack:cli
-bun run smoke:cli
 ```
 
-Read the [contribution guide](CONTRIBUTING.md) before opening an issue or pull request. See [development and releases](docs/development.md) for source commands, package validation and publishing.
+[Development and releases](docs/development.md) covers package checks and publishing. Reviewed canonical knowledge can be shared through Git, or kept local; choose the [tracking setup](https://nisargkavi.github.io/design-rover/guides/git-tracking/) that fits your project.
 
 [npm package](https://www.npmjs.com/package/design-rover) · [GitHub Releases](https://github.com/nisargkavi/design-rover/releases) · [0.5.0 release notes](docs/releases/v0.5.0.md) · [MIT license](LICENSE)

@@ -13,6 +13,7 @@ coverage
 .env.local
 .env.*.local
 apps/web/.next
+apps/docs/.astro
 apps/server/dist
 packages/*/dist
 packages/cli/.design-rover

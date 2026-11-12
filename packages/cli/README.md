@@ -1,32 +1,43 @@
 # Design Rover
 
-[![Design Rover: design knowledge for people and coding agents](https://raw.githubusercontent.com/nisargkavi/design-rover/main/assets/brand/readme-banner.png)](https://github.com/nisargkavi/design-rover)
+[![Design Rover: design knowledge for people and coding agents](https://raw.githubusercontent.com/nisargkavi/design-rover/main/assets/brand/readme-banner.png)](https://nisargkavi.github.io/design-rover/)
 
-Design knowledge from your existing React/TypeScript codebase, available to people and coding agents.
+**Help coding agents reuse the UI you already have.**
 
-Run from the project you want to analyze. Requires Bun and Node >=20.19.0; no global installation is needed.
+Design Rover records components, design tokens and UI conventions from your existing React/TypeScript project. Retrieve the relevant APIs and reviewed decisions through a local CLI, generated agent instructions or MCP before building another screen.
+
+[Documentation](https://nisargkavi.github.io/design-rover/) · [MCP setup](https://nisargkavi.github.io/design-rover/guides/mcp/) · [CLI reference](https://nisargkavi.github.io/design-rover/reference/cli/)
+
+## Quick start
+
+Requires Bun and Node >=20.19.0. Run from the project you want to analyze:
 
 ```sh
 bunx design-rover init
 bunx design-rover diff
 ```
 
-Review the output, approve the records you want with `bunx design-rover approve <id>`, then generate instructions and run checks:
+Review the output and replace `<id>` with the record or change ID you want to approve:
 
 ```sh
+bunx design-rover approve <id>
 bunx design-rover generate
+bunx design-rover context "update a form" --path src/App.tsx --json
 bunx design-rover check
-bunx design-rover context "update a form" --path src/App.tsx --max-chars 12000 --json
 ```
 
-Use a path that exists in your project. Canonical knowledge lives in `.design-rover/`; generated agent instructions are projections. `context` and MCP `get_context` check source freshness by default and return saved records with review/refresh actions when observations are stale. Run the actions from the returned repository directory: review the diff, then apply observed updates explicitly with `sync --yes`. This leaves pending approvals unchanged. Resolve decisions that need explicit approval or rejection, then request context again. Retrieval does not apply updates or approve pending rules.
+Replace the example path with one in your project. Knowledge lives in `.design-rover/`; inferred rules require explicit approval. Context requests check freshness and return review/refresh actions when saved knowledge is stale.
 
-Use `--no-check-freshness` for a saved snapshot without a source scan (MCP: `checkFreshness: false`). Pending approvals and outdated guidance are reported separately from source drift. Retrieval reports whole records omitted by its limits; freshness covers supported observations at the time of the check.
+## Live updates
 
-For live updates after initialization, leave `bunx design-rover watch` running in another terminal. It polls source changes and refreshes observed components and tokens after edits settle. Approved or human-annotated records and pending policies still require explicit review; no knowledge is auto-approved. CLI and MCP requests read the updated model on their next call.
+After initialization, leave this running in another terminal:
 
-Watch leaves generated agent files unchanged unless you pass `--generate`. Use Ctrl+C to stop; `--json` emits one JSON event per line. [Watch options](https://github.com/nisargkavi/design-rover/blob/main/docs/usage.md#watch-for-live-updates) cover polling, stability delays and review behavior.
+```sh
+bunx design-rover watch
+```
 
-Component APIs resolve through supported local imports and barrel exports. Unresolved types are reported instead of presented as complete. CSS class contracts such as `.btn`/`.field` variants are outside the React component model. Analysis runs locally and does not upload application source; a clean check does not prove complete design-system conformance, visual quality or accessibility.
+Watch refreshes observed components and tokens after edits settle. Approved contracts, human annotations and pending policies still need review. Add `--generate` to refresh agent instructions too; Ctrl+C stops the watcher.
 
-[Full documentation](https://github.com/nisargkavi/design-rover#readme) · [CLI and agent usage](https://github.com/nisargkavi/design-rover/blob/main/docs/usage.md) · [Releases](https://github.com/nisargkavi/design-rover/releases)
+Analysis supports local React/TypeScript component APIs, scoped CSS tokens and basic Tailwind configuration. Unresolved types and retrieval omissions are reported. A clean check does not prove visual quality, accessibility or complete design-system conformance. See [supported behavior and limits](https://nisargkavi.github.io/design-rover/reference/limits/).
+
+[Quickstart](https://nisargkavi.github.io/design-rover/guides/quickstart/) · [Watch guide](https://nisargkavi.github.io/design-rover/guides/watch/) · [Contribute](https://github.com/nisargkavi/design-rover/blob/main/CONTRIBUTING.md) · [Releases](https://github.com/nisargkavi/design-rover/releases)

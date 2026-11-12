@@ -19,6 +19,7 @@
     "docs:check": "bun run --filter @design-rover/docs check",
     "docs:preview": "bun run --filter @design-rover/docs preview",
     "docs:verify": "node scripts/check-docs.mjs",
+    "docs:test": "vitest run tests/docs-exports.test.ts --maxWorkers 2",
     "smoke:cli": "node scripts/smoke-cli.mjs",
     "verify:published": "node scripts/verify-published.mjs",
     "design-rover": "tsx packages/cli/src/bin.ts",

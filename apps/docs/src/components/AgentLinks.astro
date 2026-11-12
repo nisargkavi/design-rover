@@ -1,0 +1,41 @@
+---
+import PageTitle from '@astrojs/starlight/components/PageTitle.astro'
+import { indexPath, markdownPath } from '../lib/documents.mjs'
+
+const { entry } = Astro.locals.starlightRoute
+const base = import.meta.env.BASE_URL
+---
+
+<PageTitle />
+{entry.id !== '404' && (
+  <nav class="agent-links" aria-label="Documentation formats" data-pagefind-ignore>
+    <a href={markdownPath(entry.id, base)} type="text/markdown">Markdown</a>
+    <a href={indexPath(base)}>For agents</a>
+  </nav>
+)}
+
+<style>
+  .agent-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    margin-top: 0.75rem;
+    font-size: var(--sl-text-sm);
+  }
+
+  .agent-links a {
+    color: var(--sl-color-text-accent);
+    padding-block: 0.4rem;
+    text-underline-offset: 0.2em;
+  }
+
+  .agent-links a:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  .agent-links a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 4px;
+    border-radius: 2px;
+  }
+</style>

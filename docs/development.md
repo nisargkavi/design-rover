@@ -9,12 +9,15 @@ Use Node 24 for the docs tools (Astro requires Node >=22.23.4), with Bun 1.4.4. 
 ```sh
 bun run docs:dev
 bun run docs:check
+bun run docs:test
 bun run docs:build
 bun run docs:verify
 bun run docs:preview
 ```
 
-The verifier checks built routes, anchors, assets, source edit links, search and agent text exports. The Documentation workflow validates pull requests and deploys main to GitHub Pages. `DOCS_SITE` and `DOCS_BASE` configure a different deployment URL or base path. Docs-only commits do not trigger an npm version release.
+Every published page also has a Markdown export at its URL plus `index.md` (the overview uses `/design-rover/index.md`). The page's **Markdown** link opens that export; **For agents** opens the curated `llms.txt` index. The HTML head advertises both resources. `llms-full.txt` combines the same exports. All exports come from the canonical content, keep code examples intact and resolve relative links against their original source pages.
+
+The verifier checks built routes, anchors, assets, source edit links, search, Markdown content parity and export discovery links. The Documentation workflow tests both root and project-subpath builds before deploying main to GitHub Pages. `DOCS_SITE` and `DOCS_BASE` configure a different deployment URL or base path. Docs-only commits do not trigger an npm version release.
 
 Use Bun 1.4.4 for dependency installation and workspace scripts. The packaged CLI supports Node >=20.19.0.
 

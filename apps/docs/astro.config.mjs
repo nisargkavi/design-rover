@@ -20,6 +20,7 @@ export default defineConfig({
     customCss: ['./src/styles/custom.css'],
     editLink: { baseUrl: 'https://github.com/nisargkavi/design-rover/edit/main/' },
     routeMiddleware: './src/route-data.ts',
+    components: { PageTitle: './src/components/AgentLinks.astro' },
     sidebar: [
       { label: 'Overview', slug: '' },
       { label: 'Quick start', slug: 'guides/quickstart' },

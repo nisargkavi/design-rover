@@ -64,6 +64,7 @@ Options
   --limit <n>     Context: maximum whole records (default 20, maximum 100)
   --max-chars <n> Context: maximum formatted JSON characters (default 12000)
   --include-pending  Context: include inferences and suggestions for review
+  --no-check-freshness  Context: read an unchecked saved snapshot without scanning
   --fail-on <level>   CI: error (default) | warning | none
 `
 
@@ -111,14 +112,16 @@ Review one record
 Usage
   bunx design-rover context "describe your UI change" --path src/ui.tsx
 
-Retrieve a bounded JSON packet from canonical knowledge. This command does not
-scan source or prove freshness; run bunx design-rover status first when needed.
+Retrieve a bounded JSON packet from saved knowledge and check supported source
+observations. Stale context includes review/refresh actions; nothing is synced or
+approved automatically. Run the actions from freshness.actions.cwd, then retry.
 
 Options
   --path <path>       Repository-relative file or directory
   --limit <n>         Whole-record limit (default 20, maximum 100)
   --max-chars <n>     Formatted JSON budget (default 12000)
   --include-pending  Include unapproved entries for review, not as approved policy
+  --no-check-freshness  Read an unchecked snapshot without inspecting source
   --cwd <path>       Repository root
   --json             Same bounded JSON representation (no extra prose)
 
@@ -177,6 +180,7 @@ async function main() {
       limit: { type: "string" },
       "max-chars": { type: "string" },
       "include-pending": { type: "boolean", default: false },
+      "no-check-freshness": { type: "boolean", default: false },
       "fail-on": { type: "string", default: "error" },
       approve: { type: "boolean", default: false },
       generate: { type: "boolean", default: false },
@@ -327,6 +331,7 @@ async function main() {
       includePending: Boolean(parsed.values["include-pending"]),
       limit: parsed.values.limit === undefined ? undefined : Number(parsed.values.limit),
       maxChars: parsed.values["max-chars"] === undefined ? undefined : Number(parsed.values["max-chars"]),
+      checkFreshness: !parsed.values["no-check-freshness"],
     })
     // This command has one bounded representation, with or without --json.
     process.stdout.write(serializeContext(packet))

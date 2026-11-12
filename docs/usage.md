@@ -49,16 +49,31 @@ The packet includes whole records and reports omissions when the result count or
 
 ## AI agents and MCP
 
-Start with freshness, then retrieve the task context:
+Retrieve context for the task:
 
 ```sh
-bunx design-rover status --json
 bunx design-rover context "update the settings form" --path app/settings/page.tsx --max-chars 12000 --json
 ```
 
-`status` inspects the repository. `context` and MCP `get_context` read the canonical model without scanning source. If status reports changed observations, review `sync` proposals before relying on the model. Read the referenced implementation before using an API whose resolution is incomplete.
+`context` and MCP `get_context` check supported source observations against the saved model by default. The returned records still come from that model; the check does not apply updates or approve knowledge. `status --json` remains available for a full repository summary.
 
-Source inspection (`status`, `diff`, `check` and MCP `get_system`) may refresh the ignored `.design-rover/cache/evidence.json` source-text cache. It does not approve knowledge or rewrite application source. `context` and `get_context` do not refresh this cache.
+Inspect the packet's `freshness` before relying on its records:
+
+- `checked: true` and `checkedAt` record the point-in-time check. `sourceStatus` is `current` or `stale`, and `sourceChanges` counts proposed observation changes.
+- `pendingReview` counts unapproved knowledge; pending approval alone does not make source observations stale. `staleGenerated` separately counts outdated agent projections.
+- When observations are stale, `actions.review` shows the diff command and `actions.refresh` shows `bunx design-rover sync --yes`. Run these from `actions.cwd`: review the diff, then apply observed updates explicitly. `--yes` allows noninteractive application; it does not approve pending rules. Resolve proposals that require explicit approval or rejection, including protected removals, then request context again. Outdated projections alone receive an `actions.generate` command.
+
+A current result means the supported comparison found no new source proposals. Rejected proposals remain suppressed, and unsupported code can remain unresolved. Freshness is not proof of complete analysis or protection against edits made after the check. Read the referenced implementation before using an API whose resolution is incomplete. A failed freshness check returns an error rather than claiming the snapshot is current.
+
+For an explicit saved snapshot without inspecting source:
+
+```sh
+bunx design-rover context "update the settings form" --path app/settings/page.tsx --no-check-freshness --json
+```
+
+MCP `get_context` accepts `checkFreshness: false` for the same behavior. Snapshot-only results report `freshness.checked: false`; pure library `retrieveContext` also remains snapshot-only.
+
+Source inspection (`context`, `get_context`, `status`, `diff`, `check` and MCP `get_system`) may refresh the ignored `.design-rover/cache/evidence.json` source-text cache. Context freshness checks preserve the saved model, approvals, history, generated guidance and application source. Snapshot-only retrieval does not refresh the cache.
 
 Generate agent instruction projections with:
 

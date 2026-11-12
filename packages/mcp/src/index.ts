@@ -1,4 +1,4 @@
-import { createEngine, explain, loadCanonical, retrieveContext, serializeContext } from "@design-rover/core"
+import { createEngine, explain, loadCanonical, serializeContext } from "@design-rover/core"
 import { CLI_PACKAGE, CLI_VERSION, type CanonicalModel } from "@design-rover/model"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
@@ -131,19 +131,19 @@ export async function createMcpServer(root: string) {
   server.registerTool(
     "get_context",
     {
-      description: "Retrieve bounded canonical design context for a task/query and/or repository-relative path. Whole records are ranked deterministically; inspect coverage and omission warnings before relying on it. Does not scan source or check freshness.",
+      description: "Retrieve bounded saved design context for a task/query and/or repository-relative path. Checks supported source observations by default and returns review/refresh actions when stale; never syncs or approves knowledge. Run supplied commands from actions.cwd, then request context again. Set checkFreshness: false for an explicitly unchecked snapshot. Inspect freshness, coverage and omission warnings before relying on it.",
       inputSchema: {
         query: z.string().max(512).optional(),
         path: z.string().max(512).optional(),
         includePending: z.boolean().optional(),
         limit: z.number().int().min(1).max(100).optional(),
         maxChars: z.number().int().min(1024).max(100000).optional(),
+        checkFreshness: z.boolean().optional(),
       },
       annotations: { readOnlyHint: true },
     },
     async (options) => {
-      const model = await requireModel()
-      const packet = retrieveContext(model, options)
+      const packet = await engine.context(options)
       return { content: [{ type: "text", text: serializeContext(packet) }] }
     },
   )

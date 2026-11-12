@@ -1,6 +1,6 @@
 import path from "node:path"
 import ignore from "ignore"
-import type { CanonicalModel, TokenRecord } from "@design-rover/model"
+import type { CanonicalModel, SystemDiff, TokenRecord } from "@design-rover/model"
 import { variableReferences } from "./token-usage.ts"
 
 const KINDS = ["component", "token", "pattern", "convention", "intent", "exception"] as const
@@ -13,6 +13,30 @@ export type ContextOptions = {
   limit?: number
   maxChars?: number
 }
+
+export type ContextFreshnessCheck = {
+  checkedAt: string
+  syncStatus: SystemDiff["syncStatus"]
+  sourceChanges: number
+  pendingReview: number
+  staleGenerated: number
+  root: string
+}
+
+export type ContextFreshness = {
+  canonicalUpdatedAt: string
+  lastAnalyzedAt: string | null
+  recordedSyncStatus: string
+} & ({ checked: false } | {
+  checked: true
+  checkedAt: string
+  sourceStatus: "current" | "stale"
+  syncStatus: SystemDiff["syncStatus"]
+  sourceChanges: number
+  pendingReview: number
+  staleGenerated: number
+  actions?: { cwd: string; review?: string; refresh?: string; generate?: string }
+})
 
 export type ContextMatch = {
   kind: ContextKind
@@ -27,7 +51,7 @@ export type ContextPacket = {
   repository: string
   scope: { query: string | null; path: string | null; includePending: boolean }
   limits: { limit: number; maxChars: number; outputChars: number; unit: "UTF-16 code units including JSON formatting and final newline" }
-  freshness: { checked: false; canonicalUpdatedAt: string; lastAnalyzedAt: string | null; recordedSyncStatus: string }
+  freshness: ContextFreshness
   coverage: {
     matched: number; returned: number; complete: boolean
     omittedByLimit: number; omittedByBudget: number
@@ -107,8 +131,7 @@ function pathScopeMatches(patterns: string[], selected: string, allowDescendants
   return undefined
 }
 
-/** Canonical-only retrieval. Source scanning and freshness checking remain explicit. */
-export function retrieveContext(model: CanonicalModel, options: ContextOptions = {}): ContextPacket {
+export function validateContextOptions(options: ContextOptions) {
   const query = options.query?.trim() ?? ""
   if (query.length > 512) throw new Error("Context query must be at most 512 characters.")
   const selected = options.path === undefined ? undefined : normalizePath(options.path)
@@ -118,6 +141,37 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Context limit must be an integer from 1 to 100.")
   if (!Number.isInteger(maxChars) || maxChars < 1024 || maxChars > 100_000) throw new Error("Context maxChars must be an integer from 1024 to 100000.")
   const includePending = options.includePending ?? false
+  return { query, selected, limit, maxChars, includePending }
+}
+
+/** Pure canonical retrieval; an engine can attach a source check before budgeting. */
+export function retrieveContext(model: CanonicalModel, options: ContextOptions = {}, check?: ContextFreshnessCheck): ContextPacket {
+  const { query, selected, limit, maxChars, includePending } = validateContextOptions(options)
+  const freshness: ContextFreshness = {
+    canonicalUpdatedAt: model.system.updatedAt,
+    lastAnalyzedAt: model.system.lastAnalyzedAt ?? null,
+    recordedSyncStatus: model.system.syncStatus,
+    ...(check ? {
+      checked: true as const,
+      checkedAt: check.checkedAt,
+      sourceStatus: check.sourceChanges ? "stale" as const : "current" as const,
+      syncStatus: check.syncStatus,
+      sourceChanges: check.sourceChanges,
+      pendingReview: check.pendingReview,
+      staleGenerated: check.staleGenerated,
+      ...(check.sourceChanges || check.pendingReview || check.staleGenerated ? { actions: {
+        cwd: check.root,
+        ...(check.sourceChanges || check.pendingReview ? { review: "bunx design-rover diff --json" } : {}),
+        ...(check.sourceChanges ? { refresh: "bunx design-rover sync --yes" } : {}),
+        ...(!check.sourceChanges && check.staleGenerated ? { generate: "bunx design-rover generate" } : {}),
+      } } : {}),
+    } : { checked: false as const }),
+  }
+  const freshnessWarnings = check ? [
+    ...(check.sourceChanges ? ["Saved context is stale: supported source observations have changed. Review freshness.actions.review, then use freshness.actions.refresh from freshness.actions.cwd. Request context again; changes requiring explicit decisions may remain."] : []),
+    ...(check.pendingReview ? ["Pending knowledge still requires explicit approval; checking freshness does not approve it."] : []),
+    ...(check.staleGenerated ? ["Generated agent guidance is stale; refresh it using the supplied action before relying on those files."] : []),
+  ] : ["Canonical snapshot only; freshness was not checked. Run status or request context with freshness checking enabled."]
   const words = [...new Set(lexicalWords(query))].slice(0, 32)
   const matches: ContextMatch[] = []
   const relevantComponents = new Set<string>()
@@ -263,9 +317,9 @@ export function retrieveContext(model: CanonicalModel, options: ContextOptions =
       repository: model.system.repository.name,
       scope: { query: query || null, path: selected ?? null, includePending },
       limits: { limit, maxChars, outputChars: 0, unit: "UTF-16 code units including JSON formatting and final newline" },
-      freshness: { checked: false, canonicalUpdatedAt: model.system.updatedAt, lastAnalyzedAt: model.system.lastAnalyzedAt ?? null, recordedSyncStatus: model.system.syncStatus },
+      freshness,
       coverage: { matched: matches.length, returned: items.length, complete: items.length === matches.length, omittedByLimit, omittedByBudget, approvedDecisions: { matched: decisionCount, returned: returnedDecisions, omitted: omittedDecisions } },
-      warnings: ["Canonical snapshot only; run status to check source freshness.", ...[...dependencyWarnings].sort(compare)],
+      warnings: [...freshnessWarnings, ...[...dependencyWarnings].sort(compare)],
       matches: items,
     }
     if (omittedDecisions) result.warnings.push("Applicable approved decisions were omitted. Retrieve them before treating this context as complete.")

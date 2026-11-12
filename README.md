@@ -40,14 +40,15 @@ Approve a component ID to establish a reviewed API contract. Confirmed changes o
 
 ## Use with an AI agent
 
-Check freshness, then retrieve context for the task and path you are editing:
+Retrieve context for the task and path you are editing:
 
 ```sh
-bunx design-rover status --json
 bunx design-rover context "add a billing form" --path app/billing/page.tsx --max-chars 12000 --json
 ```
 
-Use a path that exists in your project. `context` reads the saved model without scanning source. Refresh observations with `sync` when needed; do not treat a saved context packet as proof that the code is current.
+Use a path that exists in your project. `context` and MCP `get_context` check source freshness by default, then return saved knowledge with a freshness summary. When observations are stale, the packet gives commands to review the diff and, after review, apply observed updates with `sync --yes`, plus the repository directory to run them from. Retrieval does not apply updates or approve pending rules. Resolve any decisions that require explicit approval or rejection, then request context again.
+
+Use `status --json` for a full repository summary. For a saved snapshot without a freshness scan, pass `--no-check-freshness` to `context` or `checkFreshness: false` to MCP `get_context`; the result reports `freshness.checked: false`.
 
 Approved rules and observed APIs are included by default. Pending inferences require `--include-pending`. The result reports omitted records and decisions when a limit is reached: narrow the request or increase the budget rather than silently ignoring a constraint.
 

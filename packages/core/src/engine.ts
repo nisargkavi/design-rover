@@ -1,6 +1,6 @@
 import path from "node:path"
 import { nowIso, type CanonicalModel, type StatusReport } from "@design-rover/model"
-import { retrieveContext, type ContextOptions } from "./retrieval.ts"
+import { retrieveContext, validateContextOptions, type ContextOptions } from "./retrieval.ts"
 import { analyzeRepository, type AnalyzeOptions } from "./analyze.ts"
 import { captureBaseline, checkSnippet, checkSystem } from "./check.ts"
 import { usageDiagnostics } from "./usage-check.ts"
@@ -26,6 +26,8 @@ export type EngineResult = {
   model?: CanonicalModel
   evidence?: RepoEvidence
 }
+
+export type ContextRequestOptions = ContextOptions & { checkFreshness?: boolean }
 
 function repoName(root: string): string {
   return path.basename(root)
@@ -191,10 +193,28 @@ export async function createEngine(root: string) {
       if (!model) return undefined
       return searchModel(model, query)
     },
-    context: async (options: ContextOptions = {}) => {
+    context: async (options: ContextRequestOptions = {}) => {
       const model = await loadCanonical(root)
       if (!model) throw new Error("Design Rover is not initialized. Run `design-rover init` before retrieving context.")
-      return retrieveContext(model, options)
+      validateContextOptions(options)
+      if (options.checkFreshness === false) return retrieveContext(model, options)
+      const { snapshot, diff } = await (async () => {
+        try {
+          const { snapshot } = await analyze({ incremental: true })
+          return { snapshot, diff: await diffAgainstRepo(root, snapshot, model) }
+        } catch (error) {
+          throw new Error(`Unable to check context freshness. Run \`bunx design-rover status\` in ${root} to diagnose the source scan. For an explicitly unchecked snapshot, use --no-check-freshness (MCP: checkFreshness: false). ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+        }
+      })()
+      return retrieveContext(model, options, {
+        checkedAt: snapshot.analyzedAt,
+        syncStatus: diff.syncStatus,
+        sourceChanges: diff.changes.filter((change) => change.entity !== "projection" && change.before !== change.after).length,
+        pendingReview: [model.components, model.tokens, model.patterns, model.conventions, model.intents, model.exceptions]
+          .flat().filter((item) => item.status === "inferred" || item.status === "suggested").length,
+        staleGenerated: diff.generated.stale.length,
+        root: path.resolve(root),
+      })
     },
     history: () => history(root),
     checkSnippet: async (code: string, fileName: string) => {
